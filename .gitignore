@@ -1,4 +1,4 @@
-oauth2-proxy
+kube-auth-proxy
 vendor
 dist
 release

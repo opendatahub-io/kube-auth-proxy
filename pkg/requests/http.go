@@ -3,7 +3,7 @@ package requests
 import (
 	"net/http"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/version"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version"
 )
 
 type userAgentTransport struct {
@@ -19,7 +19,7 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 var DefaultHTTPClient = &http.Client{Transport: &userAgentTransport{
 	next:      DefaultTransport,
-	userAgent: "oauth2-proxy/" + version.VERSION,
+	userAgent: "kube-auth-proxy/" + version.VERSION,
 }}
 
 var DefaultTransport = http.DefaultTransport

@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/justinas/alice"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/app/pagewriter"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/pagewriter"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 )
 
 // newRewritePath creates a new middleware that will rewrite the request URI

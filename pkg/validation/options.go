@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/mbland/hmacauth"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/ip"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
-	internaloidc "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/providers/oidc"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/ip"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 )
 
 // Validate checks that required options are set and validates those that they

@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	. "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options/testutil"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options/testutil"
 	"github.com/spf13/pflag"
 )
 

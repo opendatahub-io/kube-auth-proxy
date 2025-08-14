@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
-	sessionsapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
-	cookiesapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/cookies"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/encryption"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	sessionsapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
+	cookiesapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
 )
 
 // testInput is passed to test function as a pointer.

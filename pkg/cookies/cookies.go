@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
-	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	requestutil "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests/util"
 )
 
 // MakeCookieFromOptions constructs a cookie based on the given *options.CookieOptions,

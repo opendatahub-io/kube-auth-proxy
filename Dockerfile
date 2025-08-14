@@ -15,7 +15,7 @@ ARG VERSION
 FROM --platform=${BUILDPLATFORM} ${BUILD_IMAGE} AS builder
 
 # Copy sources
-WORKDIR $GOPATH/src/github.com/oauth2-proxy/oauth2-proxy
+WORKDIR $GOPATH/src/github.com/opendatahub-io/kube-auth-proxy
 
 # Fetch dependencies
 COPY go.mod go.sum ./
@@ -60,15 +60,15 @@ FROM ${RUNTIME_IMAGE}
 # Reload version
 ARG VERSION
 
-COPY --from=builder /go/src/github.com/oauth2-proxy/oauth2-proxy/oauth2-proxy /bin/oauth2-proxy
-COPY --from=builder /go/src/github.com/oauth2-proxy/oauth2-proxy/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
+COPY --from=builder /go/src/github.com/opendatahub-io/kube-auth-proxy/kube-auth-proxy /bin/kube-auth-proxy
+COPY --from=builder /go/src/github.com/opendatahub-io/kube-auth-proxy/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
 
 LABEL org.opencontainers.image.licenses=MIT \
       org.opencontainers.image.description="A reverse proxy that provides authentication with Google, Azure, OpenID Connect and many more identity providers." \
-      org.opencontainers.image.documentation=https://oauth2-proxy.github.io/oauth2-proxy/ \
-      org.opencontainers.image.source=https://github.com/oauth2-proxy/oauth2-proxy \
-      org.opencontainers.image.url=https://quay.io/oauth2-proxy/oauth2-proxy \
-      org.opencontainers.image.title=oauth2-proxy \
+      org.opencontainers.image.documentation=https://github.com/opendatahub-io/kube-auth-proxy \
+      org.opencontainers.image.source=https://github.com/opendatahub-io/kube-auth-proxy \
+      org.opencontainers.image.url=https://quay.io/opendatahub/kube-auth-proxy \
+      org.opencontainers.image.title=kube-auth-proxy \
       org.opencontainers.image.version=${VERSION}
 
-ENTRYPOINT ["/bin/oauth2-proxy"]
+ENTRYPOINT ["/bin/kube-auth-proxy"]

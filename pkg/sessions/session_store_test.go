@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions"
-	sessionscookie "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions/cookie"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions/persistence"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions/redis"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions"
+	sessionscookie "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions/cookie"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions/persistence"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions/redis"
 )
 
 func TestSessionStore(t *testing.T) {

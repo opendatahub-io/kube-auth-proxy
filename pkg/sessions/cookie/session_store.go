@@ -8,11 +8,11 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
-	pkgcookies "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/cookies"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/encryption"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
+	pkgcookies "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 )
 
 const (

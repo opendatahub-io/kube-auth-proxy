@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	ipapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/ip"
+	ipapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/ip"
 	"github.com/stretchr/testify/assert"
 )
 

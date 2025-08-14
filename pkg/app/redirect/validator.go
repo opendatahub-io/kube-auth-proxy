@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 
-	util "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util"
+	util "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 )
 
 var (

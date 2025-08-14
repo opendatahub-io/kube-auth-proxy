@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/justinas/alice"
-	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
-	sessionsapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/providers"
+	middlewareapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
+	sessionsapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/providers"
 )
 
 const (

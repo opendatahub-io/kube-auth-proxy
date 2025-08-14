@@ -12,8 +12,8 @@ import (
 	"text/template"
 	"time"
 
-	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
-	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
+	middlewareapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
+	requestutil "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests/util"
 )
 
 // AuthStatus defines the different types of auth logging that occur

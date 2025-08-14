@@ -4,8 +4,8 @@ import (
 	"crypto"
 	"net/url"
 
-	ipapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/ip"
-	internaloidc "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/providers/oidc"
+	ipapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/ip"
+	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
 	"github.com/spf13/pflag"
 )
 

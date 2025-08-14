@@ -9,10 +9,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 )
 
 func validateUpstreams(upstreams options.UpstreamConfig) []string {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
 )
 
 type scopeKey string

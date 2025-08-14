@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 
-	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	middlewareapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
 )
 
 var _ = Describe("File Server Suite", func() {

@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/clock"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/encryption"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/clock"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
 	"github.com/pierrec/lz4/v4"
 	"github.com/vmihailenco/msgpack/v5"
 )

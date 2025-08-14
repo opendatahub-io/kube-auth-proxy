@@ -15,15 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/sessions"
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/encryption"
-	internaloidc "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/providers/oidc"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
+	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
 	"golang.org/x/oauth2"
 )
 

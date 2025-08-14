@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"regexp"
 
-	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/app/pagewriter"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/pagewriter"
 )
 
 var _ = Describe("Rewrite", func() {

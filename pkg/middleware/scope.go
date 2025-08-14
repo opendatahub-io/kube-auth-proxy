@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/justinas/alice"
-	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
+	middlewareapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
 )
 
 func NewScope(reverseProxy bool, idHeader string) alice.Constructor {

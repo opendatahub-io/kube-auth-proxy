@@ -27,11 +27,11 @@ help: ## Display this help
 GO ?= go
 GOLANGCILINT ?= golangci-lint
 
-BINARY := oauth2-proxy
+BINARY := kube-auth-proxy
 VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo "undefined")
 # Allow to override image registry.
-REGISTRY   ?= quay.io/oauth2-proxy
-REPOSITORY ?= oauth2-proxy
+REGISTRY   ?= quay.io/opendatahub
+REPOSITORY ?= kube-auth-proxy
 
 DATE := $(shell date +"%Y%m%d")
 .NOTPARALLEL:
@@ -51,10 +51,10 @@ endif
 ##@ Build
 
 .PHONY: build
-build: validate-go-version clean $(BINARY) ## Build and create oauth2-proxy binary from current source code
+build: validate-go-version clean $(BINARY) ## Build and create kube-auth-proxy binary from current source code
 
 $(BINARY):
-	CGO_ENABLED=0 $(GO) build -a -installsuffix cgo -ldflags="-X github.com/oauth2-proxy/oauth2-proxy/v7/pkg/version.VERSION=${VERSION}" -o $@ github.com/oauth2-proxy/oauth2-proxy/v7
+	CGO_ENABLED=0 $(GO) build -a -installsuffix cgo -ldflags="-X github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version.VERSION=${VERSION}" -o $@ github.com/opendatahub-io/kube-auth-proxy/v1
 
 DOCKER_BUILDX_COMMON_ARGS     ?= --build-arg BUILD_IMAGE=docker.io/library/golang:${GO_MOD_VERSION}-bookworm --build-arg VERSION=${VERSION}
 
