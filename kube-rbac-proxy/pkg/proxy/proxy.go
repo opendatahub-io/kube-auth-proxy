@@ -59,6 +59,11 @@ func (n krpAuthorizerAttributesGetter) GetRequestAttributes(u user.Info, r *http
 		apiVerb = "delete"
 	}
 
+	// If a verb is configured in ResourceAttributes, use it instead of the HTTP method-derived verb
+	if n.authzConfig.ResourceAttributes != nil && n.authzConfig.ResourceAttributes.Verb != "" {
+		apiVerb = n.authzConfig.ResourceAttributes.Verb
+	}
+
 	var allAttrs []authorizer.Attributes
 
 	defer func() {
