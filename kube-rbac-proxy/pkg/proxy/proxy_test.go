@@ -200,6 +200,63 @@ func TestGeneratingAuthorizerAttributes(t *testing.T) {
 				},
 			},
 		},
+		{
+			"with configured verb in ResourceAttributes",
+			&authz.Config{ResourceAttributes: &authz.ResourceAttributes{Namespace: "tenant1", APIVersion: "v1", Resource: "namespace", Subresource: "metrics", Verb: "list"}},
+			createRequest(nil, nil),
+			[]authorizer.Attributes{
+				authorizer.AttributesRecord{
+					User:            nil,
+					Verb:            "list",
+					Namespace:       "tenant1",
+					APIGroup:        "",
+					APIVersion:      "v1",
+					Resource:        "namespace",
+					Subresource:     "metrics",
+					Name:            "",
+					ResourceRequest: true,
+				},
+			},
+		},
+		{
+			"with different HTTP method but configured verb overrides it",
+			&authz.Config{ResourceAttributes: &authz.ResourceAttributes{Namespace: "tenant1", APIVersion: "v1", Resource: "namespace", Subresource: "metrics", Verb: "create"}},
+			createRequestWithMethod("DELETE", nil, nil),
+			[]authorizer.Attributes{
+				authorizer.AttributesRecord{
+					User:            nil,
+					Verb:            "create",
+					Namespace:       "tenant1",
+					APIGroup:        "",
+					APIVersion:      "v1",
+					Resource:        "namespace",
+					Subresource:     "metrics",
+					Name:            "",
+					ResourceRequest: true,
+				},
+			},
+		},
+		{
+			"with configured verb and rewrites - verb is not templated",
+			&authz.Config{
+				Rewrites:           &authz.SubjectAccessReviewRewrites{ByQueryParameter: &authz.QueryParameterRewriteConfig{Name: "namespace"}},
+				ResourceAttributes: &authz.ResourceAttributes{Namespace: "{{ .Value }}", APIVersion: "v1", Resource: "namespace", Subresource: "metrics", Verb: "list"},
+			},
+			createRequest(map[string][]string{"namespace": {"tenant1"}}, nil),
+			[]authorizer.Attributes{
+				authorizer.AttributesRecord{
+					User:            nil,
+					Verb:            "list",
+					Namespace:       "tenant1",
+					APIGroup:        "",
+					APIVersion:      "v1",
+					Resource:        "namespace",
+					Subresource:     "metrics",
+					Name:            "",
+					ResourceRequest: true,
+				},
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -215,7 +272,11 @@ func TestGeneratingAuthorizerAttributes(t *testing.T) {
 }
 
 func createRequest(queryParams, headers map[string][]string) *http.Request {
-	r := httptest.NewRequest("GET", "/accounts", nil)
+	return createRequestWithMethod("GET", queryParams, headers)
+}
+
+func createRequestWithMethod(method string, queryParams, headers map[string][]string) *http.Request {
+	r := httptest.NewRequest(method, "/accounts", nil)
 	if queryParams != nil {
 		q := r.URL.Query()
 		for key, values := range queryParams {

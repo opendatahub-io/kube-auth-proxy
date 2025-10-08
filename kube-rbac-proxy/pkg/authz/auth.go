@@ -63,6 +63,7 @@ type ResourceAttributes struct {
 	Resource    string `json:"resource,omitempty"`
 	Subresource string `json:"subresource,omitempty"`
 	Name        string `json:"name,omitempty"`
+	Verb        string `json:"verb,omitempty"`
 }
 
 // StaticAuthorizationConfig describes what is needed to specify a static
