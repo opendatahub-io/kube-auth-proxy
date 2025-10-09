@@ -8,18 +8,28 @@ import (
 	"syscall"
 )
 
+const (
+	// Proxy modes
+	ModeAuth = "auth"
+	ModeRBAC = "rbac"
+
+	// Binary paths
+	AuthProxyBinary = "/bin/kube-auth-proxy"
+	RBACProxyBinary = "/bin/kube-rbac-proxy"
+)
+
 func main() {
 	// Default mode is rbac
-	mode := "rbac"
+	mode := ModeRBAC
 	args := os.Args[1:]
 
 	// Check environment variable first
 	if envMode := os.Getenv("PROXY_MODE"); envMode != "" {
-		if envMode == "auth" || envMode == "rbac" {
+		if envMode == ModeAuth || envMode == ModeRBAC {
 			mode = envMode
 		} else {
 			fmt.Fprintf(os.Stderr, "Invalid PROXY_MODE environment variable: %s\n", envMode)
-			fmt.Fprintf(os.Stderr, "PROXY_MODE must be 'auth' or 'rbac'\n")
+			fmt.Fprintf(os.Stderr, "PROXY_MODE must be '%s' or '%s'\n", ModeAuth, ModeRBAC)
 			os.Exit(1)
 		}
 	}
@@ -27,34 +37,34 @@ func main() {
 	// Command line argument can override environment variable
 	if len(args) > 0 {
 		firstArg := args[0]
-		if firstArg == "auth" || firstArg == "rbac" {
+		if firstArg == ModeAuth || firstArg == ModeRBAC {
 			mode = firstArg
 			args = args[1:] // Remove mode from args
 		} else if !strings.HasPrefix(firstArg, "-") {
 			// If it doesn't start with a dash and isn't a valid mode, show error
 			fmt.Fprintf(os.Stderr, "Invalid mode: %s\n", firstArg)
-			fmt.Fprintf(os.Stderr, "Usage: %s [auth|rbac] [additional arguments...]\n", os.Args[0])
+			fmt.Fprintf(os.Stderr, "Usage: %s [%s|%s] [additional arguments...]\n", os.Args[0], ModeAuth, ModeRBAC)
 			fmt.Fprintf(os.Stderr, "Mode can also be set with PROXY_MODE environment variable\n")
-			fmt.Fprintf(os.Stderr, "  auth - Run kube-auth-proxy\n")
-			fmt.Fprintf(os.Stderr, "  rbac - Run kube-rbac-proxy (default)\n")
+			fmt.Fprintf(os.Stderr, "  %s - Run kube-auth-proxy\n", ModeAuth)
+			fmt.Fprintf(os.Stderr, "  %s - Run kube-rbac-proxy (default)\n", ModeRBAC)
 			os.Exit(1)
 		}
 	}
 
 	var binary string
 	switch mode {
-	case "auth":
+	case ModeAuth:
 		fmt.Println("Starting kube-auth-proxy...")
-		binary = "/bin/kube-auth-proxy"
-	case "rbac":
+		binary = AuthProxyBinary
+	case ModeRBAC:
 		fmt.Println("Starting kube-rbac-proxy...")
-		binary = "/bin/kube-rbac-proxy"
+		binary = RBACProxyBinary
 	default:
 		fmt.Fprintf(os.Stderr, "Invalid mode: %s\n", mode)
-		fmt.Fprintf(os.Stderr, "Usage: %s [auth|rbac] [additional arguments...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [%s|%s] [additional arguments...]\n", os.Args[0], ModeAuth, ModeRBAC)
 		fmt.Fprintf(os.Stderr, "Mode can also be set with PROXY_MODE environment variable\n")
-		fmt.Fprintf(os.Stderr, "  auth - Run kube-auth-proxy\n")
-		fmt.Fprintf(os.Stderr, "  rbac - Run kube-rbac-proxy (default)\n")
+		fmt.Fprintf(os.Stderr, "  %s - Run kube-auth-proxy\n", ModeAuth)
+		fmt.Fprintf(os.Stderr, "  %s - Run kube-rbac-proxy (default)\n", ModeRBAC)
 		os.Exit(1)
 	}
 
