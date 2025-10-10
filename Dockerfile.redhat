@@ -1,12 +1,14 @@
 # Dockerfile.redhat - FIPS-compliant build for Red Hat environments
+# TARGETPLATFORM is automatically set by docker buildx and must be declared before FROM
+ARG TARGETPLATFORM
+
 # Argument for setting the oauth2-proxy build version
 ARG VERSION
 
-# All builds should be done using the platform native to the build node to allow
-#  cache sharing of the go mod download step.
-# Go cross compilation is also faster than emulation the go compilation across
-#  multiple platforms.
-FROM --platform=${BUILDPLATFORM} registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
+# For FIPS builds with CGO, we must build on the native target platform
+# because cross-compilation with CGO requires cross-compiler toolchains
+# which are not readily available in the UBI base images.
+FROM --platform=${TARGETPLATFORM} registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
 
 # Switch to root for build permissions
 USER root
@@ -21,12 +23,9 @@ RUN go mod download
 # Now pull in our code
 COPY . .
 
-# Arguments go here so that the previous steps can be cached if no external sources
-# have changed. These arguments are automatically set by the docker engine.
+# Re-declare TARGETPLATFORM and VERSION for use in RUN commands
+# (ARGs before FROM need to be re-declared to be available in build stages)
 ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-
-# Reload version argument
 ARG VERSION
 
 # Build FIPS-compliant binary and make sure there is at least an empty key file.
@@ -47,7 +46,7 @@ RUN case ${TARGETPLATFORM} in \
          "linux/arm/v6") GOARCH=arm GOARM=6  ;; \
          "linux/arm/v7") GOARCH=arm GOARM=7 ;; \
     esac && \
-    printf "Building FIPS-compliant OAuth2 Proxy for arch ${GOARCH}\n" && \
+    printf "Building FIPS-compliant kube-auth-proxy for arch ${GOARCH}\n" && \
     CGO_ENABLED=1 GOOS=linux GOARCH=${GOARCH} GOEXPERIMENT=strictfipsruntime \
     go build -a -tags strictfipsruntime \
     -ldflags="-X github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version.VERSION=${VERSION}" \
@@ -70,7 +69,7 @@ RUN chown -R 1001:0 /etc/ssl/private && \
 USER 1001
 
 LABEL org.opencontainers.image.licenses=MIT \
-      org.opencontainers.image.description="A reverse proxy that provides authentication with Google, Azure, OpenID Connect and many more identity providers. (FIPS-compliant)" \
+      org.opencontainers.image.description="A reverse proxy that provides authentication with OpenID Connect and Openshift OAuth. (FIPS-compliant)" \
       org.opencontainers.image.documentation=https://github.com/opendatahub-io/kube-auth-proxy \
       org.opencontainers.image.source=https://github.com/opendatahub-io/kube-auth-proxy \
       org.opencontainers.image.url=https://quay.io/opendatahub/kube-auth-proxy \

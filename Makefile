@@ -28,7 +28,7 @@ GO ?= go
 GOLANGCILINT ?= golangci-lint
 
 BINARY := kube-auth-proxy
-VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo "undefined")
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo "undefined")
 # Allow to override image registry.
 REGISTRY   ?= quay.io/opendatahub
 REPOSITORY ?= kube-auth-proxy
@@ -36,13 +36,9 @@ REPOSITORY ?= kube-auth-proxy
 DATE := $(shell date +"%Y%m%d")
 .NOTPARALLEL:
 
-GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
-GO_MINOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
-
-GO_MOD_VERSION = $(shell sed -En 's/^go ([[:digit:]]\.[[:digit:]]+)\.[[:digit:]]+/\1/p' go.mod)
-MINIMUM_SUPPORTED_GO_MAJOR_VERSION = $(shell echo ${GO_MOD_VERSION} | cut -d' ' -f1 | cut -d'.' -f1)
-MINIMUM_SUPPORTED_GO_MINOR_VERSION = $(shell echo ${GO_MOD_VERSION} | cut -d' ' -f1 | cut -d'.' -f2)
-GO_VERSION_VALIDATION_ERR_MSG = Golang version is not supported, please update to at least $(MINIMUM_SUPPORTED_GO_MAJOR_VERSION).$(MINIMUM_SUPPORTED_GO_MINOR_VERSION)
+GO_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1-2)
+GO_REQUIRED_VERSION = $(shell sed -En 's/^go ([[:digit:]]+\.[[:digit:]]+).*/\1/p' go.mod)
+GO_VERSION_VALIDATION_ERR_MSG = Golang version $(GO_VERSION) is not supported, please use Go $(GO_REQUIRED_VERSION)
 
 ifeq ($(COVER),true)
 TESTCOVER ?= -coverprofile c.out
@@ -60,39 +56,25 @@ $(BINARY):
 build-fips: validate-go-version clean ## Build FIPS-compliant kube-auth-proxy binary
 	CGO_ENABLED=1 GOEXPERIMENT=strictfipsruntime $(GO) build -a -tags strictfipsruntime -ldflags="-X github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version.VERSION=${VERSION}" -o $(BINARY) github.com/opendatahub-io/kube-auth-proxy/v1
 
-DOCKER_BUILDX_COMMON_ARGS     ?= --build-arg BUILD_IMAGE=docker.io/library/golang:${GO_MOD_VERSION}-bookworm --build-arg VERSION=${VERSION}
+DOCKERFILE                    ?= Dockerfile.redhat
+DOCKER_BUILDX_COMMON_ARGS     ?= --build-arg BUILD_IMAGE=docker.io/library/golang:${GO_REQUIRED_VERSION}-bookworm --build-arg VERSION=${VERSION}
 
 DOCKER_BUILD_PLATFORM         ?= linux/amd64,linux/arm64,linux/ppc64le,linux/arm/v7,linux/s390x
-DOCKER_BUILD_RUNTIME_IMAGE    ?= gcr.io/distroless/static:nonroot
-DOCKER_BUILDX_ARGS            ?= --build-arg RUNTIME_IMAGE=${DOCKER_BUILD_RUNTIME_IMAGE} ${DOCKER_BUILDX_COMMON_ARGS}
-DOCKER_BUILDX                 := docker buildx build ${DOCKER_BUILDX_ARGS} --pull
+DOCKER_BUILDX                 := docker buildx build ${DOCKER_BUILDX_COMMON_ARGS} -f ${DOCKERFILE} --pull
 DOCKER_BUILDX_X_PLATFORM      := $(DOCKER_BUILDX) --platform ${DOCKER_BUILD_PLATFORM}
 DOCKER_BUILDX_PUSH            := $(DOCKER_BUILDX) --push
 DOCKER_BUILDX_PUSH_X_PLATFORM := $(DOCKER_BUILDX_PUSH) --platform ${DOCKER_BUILD_PLATFORM}
 
-DOCKER_BUILD_PLATFORM_ALPINE         ?= linux/amd64,linux/arm64,linux/ppc64le,linux/arm/v6,linux/arm/v7,linux/s390x
-DOCKER_BUILD_RUNTIME_IMAGE_ALPINE    ?= alpine:3.22.1
-DOCKER_BUILDX_ARGS_ALPINE            ?= --build-arg RUNTIME_IMAGE=${DOCKER_BUILD_RUNTIME_IMAGE_ALPINE} ${DOCKER_BUILDX_COMMON_ARGS}
-DOCKER_BUILDX_X_PLATFORM_ALPINE      := docker buildx build ${DOCKER_BUILDX_ARGS_ALPINE} --platform ${DOCKER_BUILD_PLATFORM_ALPINE}
-DOCKER_BUILDX_PUSH_X_PLATFORM_ALPINE := $(DOCKER_BUILDX_X_PLATFORM_ALPINE) --push
-
 .PHONY: build-docker
-build-docker: build-distroless build-alpine ## Build multi architecture docker images in both flavours (distroless / alpine)
-
-.PHONY: build-distroless
-build-distroless: ## Build multi architecture distroless based docker image
+build-docker: ## Build multi architecture docker image
 	$(DOCKER_BUILDX_X_PLATFORM) -t $(REGISTRY)/$(REPOSITORY):latest -t $(REGISTRY)/$(REPOSITORY):${VERSION} .
-
-.PHONY: build-alpine
-build-alpine: ## Build multi architecture alpine based docker image
-	$(DOCKER_BUILDX_X_PLATFORM_ALPINE) -t $(REGISTRY)/$(REPOSITORY):latest-alpine -t $(REGISTRY)/$(REPOSITORY):${VERSION}-alpine .
 
 .PHONY: build-docker-fips
 build-docker-fips: ## Build FIPS-compliant docker image using Dockerfile.redhat
-	$(DOCKER_BUILDX_X_PLATFORM) -f Dockerfile.redhat -t $(REGISTRY)/$(REPOSITORY):fips -t $(REGISTRY)/$(REPOSITORY):${VERSION}-fips .
+	$(DOCKER_BUILDX_X_PLATFORM) -t $(REGISTRY)/$(REPOSITORY):fips -t $(REGISTRY)/$(REPOSITORY):${VERSION}-fips .
 
 .PHONY: build-docker-all
-build-docker-all: build-docker ## Build docker images for all supported architectures in both flavours (distroless / alpine)
+build-docker-all: build-docker ## Build docker images for all supported architectures
 	$(DOCKER_BUILDX) --platform linux/amd64   -t $(REGISTRY)/$(REPOSITORY):latest-amd64   -t $(REGISTRY)/$(REPOSITORY):${VERSION}-amd64 .
 	$(DOCKER_BUILDX) --platform linux/arm64   -t $(REGISTRY)/$(REPOSITORY):latest-arm64   -t $(REGISTRY)/$(REPOSITORY):${VERSION}-arm64 .
 	$(DOCKER_BUILDX) --platform linux/ppc64le -t $(REGISTRY)/$(REPOSITORY):latest-ppc64le -t $(REGISTRY)/$(REPOSITORY):${VERSION}-ppc64le .
@@ -103,18 +85,11 @@ build-docker-all: build-docker ## Build docker images for all supported architec
 ##@ Publish
 
 .PHONY: push-docker
-push-docker: push-distroless push-alpine ## Push multi architecture docker images for both flavours (distroless / alpine)
-
-.PHONY: push-distroless
-push-distroless: ## Push multi architecture distroless based docker image
+push-docker: ## Push multi architecture docker image
 	$(DOCKER_BUILDX_PUSH_X_PLATFORM) -t $(REGISTRY)/$(REPOSITORY):latest -t $(REGISTRY)/$(REPOSITORY):${VERSION} .
 
-.PHONY: push-alpine
-push-alpine: ## Push multi architecture alpine based docker image
-	$(DOCKER_BUILDX_PUSH_X_PLATFORM_ALPINE) -t $(REGISTRY)/$(REPOSITORY):latest-alpine -t $(REGISTRY)/$(REPOSITORY):${VERSION}-alpine .
-
 .PHONY: push-docker-all
-push-docker-all: push-docker ## Push docker images for all supported architectures for both flavours (distroless / alpine)
+push-docker-all: push-docker ## Push docker images for all supported architectures
 	$(DOCKER_BUILDX_PUSH) --platform linux/amd64   -t $(REGISTRY)/$(REPOSITORY):latest-amd64   -t $(REGISTRY)/$(REPOSITORY):${VERSION}-amd64 .
 	$(DOCKER_BUILDX_PUSH) --platform linux/arm64   -t $(REGISTRY)/$(REPOSITORY):latest-arm64   -t $(REGISTRY)/$(REPOSITORY):${VERSION}-arm64 .
 	$(DOCKER_BUILDX_PUSH) --platform linux/ppc64le -t $(REGISTRY)/$(REPOSITORY):latest-ppc64le -t $(REGISTRY)/$(REPOSITORY):${VERSION}-ppc64le .
@@ -125,14 +100,12 @@ push-docker-all: push-docker ## Push docker images for all supported architectur
 ##@ Nightly scheduling
 
 .PHONY: nightly-build
-nightly-build: ## Nightly build command for docker images in both flavours (distroless / alpine)
+nightly-build: ## Nightly build command for docker image
 	$(DOCKER_BUILDX_X_PLATFORM) -t $(REGISTRY)/$(REPOSITORY)-nightly:latest -t $(REGISTRY)/$(REPOSITORY)-nightly:${DATE} .
-	$(DOCKER_BUILDX_X_PLATFORM_ALPINE) -t ${REGISTRY}/$(REPOSITORY)-nightly:latest-alpine -t $(REGISTRY)/$(REPOSITORY)-nightly:${DATE}-alpine .
 
 .PHONY: nightly-push
-nightly-push: ## Nightly push command for docker images in both flavours (distroless / alpine)
+nightly-push: ## Nightly push command for docker image
 	$(DOCKER_BUILDX_PUSH_X_PLATFORM) -t $(REGISTRY)/$(REPOSITORY)-nightly:latest -t $(REGISTRY)/$(REPOSITORY)-nightly:${DATE} .
-	$(DOCKER_BUILDX_PUSH_X_PLATFORM_ALPINE) -t ${REGISTRY}/$(REPOSITORY)-nightly:latest-alpine -t $(REGISTRY)/$(REPOSITORY)-nightly:${DATE}-alpine .
 
 
 ##@ Docs
@@ -166,13 +139,8 @@ lint: validate-go-version ## Lint all files using golangci-lint
 
 .PHONY: validate-go-version
 validate-go-version: ## Validate Go environment requirements
-	@if [ $(GO_MAJOR_VERSION) -gt $(MINIMUM_SUPPORTED_GO_MAJOR_VERSION) ]; then \
-		exit 0 ;\
-	elif [ $(GO_MAJOR_VERSION) -lt $(MINIMUM_SUPPORTED_GO_MAJOR_VERSION) ]; then \
-		echo '$(GO_VERSION_VALIDATION_ERR_MSG)';\
-		exit 1; \
-	elif [ $(GO_MINOR_VERSION) -lt $(MINIMUM_SUPPORTED_GO_MINOR_VERSION) ] ; then \
-		echo '$(GO_VERSION_VALIDATION_ERR_MSG)';\
+	@if [ "$(GO_VERSION)" != "$(GO_REQUIRED_VERSION)" ]; then \
+		echo '$(GO_VERSION_VALIDATION_ERR_MSG)'; \
 		exit 1; \
 	fi
 

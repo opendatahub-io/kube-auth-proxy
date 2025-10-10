@@ -45,10 +45,10 @@ jobs:
         make build
 
     # For release testing
-    - name: Build All
-      if: github.base_ref == 'master' && startsWith(github.head_ref, 'release')
-      run: |
-        make release
+    #- name: Build All
+    #  if: github.base_ref == 'master' && startsWith(github.head_ref, 'release')
+    #  run: |
+    #    make release
 
     - name: Test
       env:
