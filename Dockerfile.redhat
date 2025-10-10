@@ -54,7 +54,7 @@ RUN case ${TARGETPLATFORM} in \
     touch jwt_signing_key.pem
 
 # Copy binary to FIPS-compliant runtime image
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM --platform=${TARGETPLATFORM} registry.access.redhat.com/ubi9/ubi-minimal:latest
 # Reload version
 ARG VERSION
 
