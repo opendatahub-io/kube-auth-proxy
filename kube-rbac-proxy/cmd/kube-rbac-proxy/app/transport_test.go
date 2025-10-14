@@ -38,13 +38,25 @@ import (
 )
 
 func TestInitTransportWithDefault(t *testing.T) {
-	roundTripper, err := initTransport(nil, "", "")
+	timeout := 30 * time.Second
+	roundTripper, err := initTransport(nil, "", "", timeout)
 	if err != nil {
 		t.Errorf("want err to be nil, but got %v", err)
 		return
 	}
 	if roundTripper == nil {
 		t.Error("expected roundtripper, got nil")
+		return
+	}
+
+	// Verify timeout is set correctly
+	transport, ok := roundTripper.(*http.Transport)
+	if !ok {
+		t.Error("expected *http.Transport, got different type")
+		return
+	}
+	if transport.ResponseHeaderTimeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, transport.ResponseHeaderTimeout)
 	}
 }
 
@@ -57,13 +69,19 @@ func TestInitTransportWithCustomCA(t *testing.T) {
 	upstreamCAPool := x509.NewCertPool()
 	upstreamCAPool.AppendCertsFromPEM(upstreamCAPEM)
 
-	roundTripper, err := initTransport(upstreamCAPool, "", "")
+	timeout := 45 * time.Second
+	roundTripper, err := initTransport(upstreamCAPool, "", "", timeout)
 	if err != nil {
 		t.Fatalf("want err to be nil, but got %v", err)
 	}
 	transport := roundTripper.(*http.Transport)
 	if transport.TLSClientConfig.RootCAs == nil {
 		t.Error("expected root CA to be set, got nil")
+	}
+
+	// Verify timeout is set correctly
+	if transport.ResponseHeaderTimeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, transport.ResponseHeaderTimeout)
 	}
 }
 
@@ -131,10 +149,17 @@ func TestInitTransportWithClientCertAuth(t *testing.T) {
 
 	serverCA := x509.NewCertPool()
 	serverCA.AppendCertsFromPEM(cert)
-	roundTripper, err := initTransport(serverCA, clientCertPath, clientKeyPath)
+	timeout := 60 * time.Second
+	roundTripper, err := initTransport(serverCA, clientCertPath, clientKeyPath, timeout)
 	if err != nil {
 		t.Errorf("want err to be nil, but got %v", err)
 		return
+	}
+
+	// Verify timeout is set correctly
+	transport := roundTripper.(*http.Transport)
+	if transport.ResponseHeaderTimeout != timeout {
+		t.Errorf("expected timeout %v, got %v", timeout, transport.ResponseHeaderTimeout)
 	}
 
 	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port), nil)
@@ -201,4 +226,79 @@ func generateClientCert(t *testing.T) ([]byte, []byte, *x509.CertPool, error) {
 	}
 
 	return certPEM, privKeyPEM, caPool, nil
+}
+
+// TestInitTransportTimeoutVariations tests different timeout values
+func TestInitTransportTimeoutVariations(t *testing.T) {
+	testCases := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"zero timeout", 0},
+		{"1 second", 1 * time.Second},
+		{"30 seconds (default)", 30 * time.Second},
+		{"1 minute", 1 * time.Minute},
+		{"5 minutes", 5 * time.Minute},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test with default transport (no CA)
+			roundTripper, err := initTransport(nil, "", "", tc.timeout)
+			if err != nil {
+				t.Fatalf("initTransport failed: %v", err)
+			}
+
+			transport, ok := roundTripper.(*http.Transport)
+			if !ok {
+				t.Fatal("expected *http.Transport")
+			}
+
+			if transport.ResponseHeaderTimeout != tc.timeout {
+				t.Errorf("expected timeout %v, got %v", tc.timeout, transport.ResponseHeaderTimeout)
+			}
+		})
+	}
+}
+
+// TestInitTransportTimeoutWithCA tests timeout with custom CA
+func TestInitTransportTimeoutWithCA(t *testing.T) {
+	// Create a minimal CA for testing
+	caPool := x509.NewCertPool()
+	cert, _, err := certutil.GenerateSelfSignedCertKey("test-ca", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+	caPool.AppendCertsFromPEM(cert)
+
+	testCases := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"10 seconds with CA", 10 * time.Second},
+		{"2 minutes with CA", 2 * time.Minute},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			roundTripper, err := initTransport(caPool, "", "", tc.timeout)
+			if err != nil {
+				t.Fatalf("initTransport failed: %v", err)
+			}
+
+			transport, ok := roundTripper.(*http.Transport)
+			if !ok {
+				t.Fatal("expected *http.Transport")
+			}
+
+			if transport.ResponseHeaderTimeout != tc.timeout {
+				t.Errorf("expected timeout %v, got %v", tc.timeout, transport.ResponseHeaderTimeout)
+			}
+
+			// Verify CA is still set correctly
+			if transport.TLSClientConfig.RootCAs == nil {
+				t.Error("expected root CA to be set")
+			}
+		})
+	}
 }

@@ -25,9 +25,13 @@ import (
 	"time"
 )
 
-func initTransport(upstreamCAPool *x509.CertPool, upstreamClientCertPath, upstreamClientKeyPath string) (http.RoundTripper, error) {
+func initTransport(upstreamCAPool *x509.CertPool, upstreamClientCertPath, upstreamClientKeyPath string, timeout time.Duration) (http.RoundTripper, error) {
 	if upstreamCAPool == nil {
-		return http.DefaultTransport, nil
+		// Create transport based on DefaultTransport for timeout support
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.ResponseHeaderTimeout = timeout
+		return transport, nil
+
 	}
 
 	var certKeyPair tls.Certificate
@@ -51,6 +55,7 @@ func initTransport(upstreamCAPool *x509.CertPool, upstreamClientCertPath, upstre
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: timeout,
 		TLSClientConfig: &tls.Config{
 			RootCAs: upstreamCAPool,
 		},

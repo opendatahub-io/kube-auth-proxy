@@ -132,6 +132,7 @@ type completedProxyRunOptions struct {
 	proxyEndpointsPort    int
 
 	upstreamURL      *url.URL
+	upstreamTimeout  time.Duration
 	upstreamForceH2C bool
 	upstreamCABundle *x509.CertPool
 
@@ -153,6 +154,7 @@ func Complete(o *options.ProxyRunOptions) (*completedProxyRunOptions, error) {
 		insecureListenAddress: o.InsecureListenAddress,
 		secureListenAddress:   o.SecureListenAddress,
 		proxyEndpointsPort:    o.ProxyEndpointsPort,
+		upstreamTimeout:       o.UpstreamTimeout,
 		upstreamForceH2C:      o.UpstreamForceH2C,
 
 		allowPaths:  o.AllowPaths,
@@ -264,7 +266,7 @@ func Run(cfg *completedProxyRunOptions) error {
 		sarAuthorizer,
 	)
 
-	upstreamTransport, err := initTransport(cfg.upstreamCABundle, cfg.tls.UpstreamClientCertFile, cfg.tls.UpstreamClientKeyFile)
+	upstreamTransport, err := initTransport(cfg.upstreamCABundle, cfg.tls.UpstreamClientCertFile, cfg.tls.UpstreamClientKeyFile, cfg.upstreamTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to set up upstream TLS connection: %w", err)
 	}

@@ -191,6 +191,84 @@ func testFlags(client kubernetes.Interface) kubetest.TestSuite {
 				),
 			),
 		}.Run(t)
+
+		kubetest.Scenario{
+			Name: "WithUpstreamTimeout",
+			Description: `
+				Test that the upstream-timeout flag works correctly.
+				This verifies that requests complete successfully when the upstream-timeout flag is set.
+			`,
+
+			Given: kubetest.Actions(
+				kubetest.CreatedManifests(
+					client,
+					"flags/clusterRole.yaml",
+					"flags/clusterRoleBinding.yaml",
+					"flags/deployment-upstream-timeout.yaml",
+					"flags/service.yaml",
+					"flags/serviceAccount.yaml",
+					"flags/clusterRole-client.yaml",
+					"flags/clusterRoleBinding-client.yaml",
+				),
+			),
+			When: kubetest.Actions(
+				kubetest.PodsAreReady(
+					client,
+					1,
+					"app=kube-rbac-proxy",
+				),
+				kubetest.ServiceIsReady(
+					client,
+					"kube-rbac-proxy",
+				),
+			),
+			Then: kubetest.Actions(
+				kubetest.ClientSucceeds(
+					client,
+					command,
+					nil,
+				),
+			),
+		}.Run(t)
+
+		kubetest.Scenario{
+			Name: "WithVeryShortUpstreamTimeout",
+			Description: `
+				Test that upstream timeout actually works by setting a very short timeout (10ms).
+				This should fail because 10ms is too short for any real network request.
+			`,
+
+			Given: kubetest.Actions(
+				kubetest.CreatedManifests(
+					client,
+					"flags/clusterRole.yaml",
+					"flags/clusterRoleBinding.yaml",
+					"flags/deployment-short-timeout.yaml",
+					"flags/service.yaml",
+					"flags/serviceAccount.yaml",
+					"flags/clusterRole-client.yaml",
+					"flags/clusterRoleBinding-client.yaml",
+				),
+			),
+			When: kubetest.Actions(
+				kubetest.PodsAreReady(
+					client,
+					1,
+					"app=kube-rbac-proxy",
+				),
+				kubetest.ServiceIsReady(
+					client,
+					"kube-rbac-proxy",
+				),
+			),
+			Then: kubetest.Actions(
+				kubetest.ClientFails(
+					client,
+					command,
+					nil,
+				),
+			),
+		}.Run(t)
 	}
 }
 
