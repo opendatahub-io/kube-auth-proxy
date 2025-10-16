@@ -25,13 +25,9 @@ spec:
   - name: output-image
     value: quay.io/opendatahub/odh-kube-auth-proxy:latest
   - name: dockerfile
-    value: Dockerfile
+    value: Dockerfile.redhat
   - name: path-context
     value: .
-  - name: build-args
-    value:
-    - BUILD_IMAGE=registry.access.redhat.com/ubi9/go-toolset:1.24
-    - RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while maintaining trust after pipeline customization.
