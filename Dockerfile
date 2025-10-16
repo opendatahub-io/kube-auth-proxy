@@ -14,6 +14,9 @@ ARG VERSION
 #  multiple platforms.
 FROM --platform=${BUILDPLATFORM} ${BUILD_IMAGE} AS builder
 
+# Switch to root for build permissions
+USER root
+
 # Copy sources
 WORKDIR /workspace
 
@@ -74,8 +77,16 @@ ARG VERSION
 
 COPY --from=builder /workspace/kube-auth-proxy /bin/kube-auth-proxy
 COPY --from=builder /workspace/kube-rbac-proxy/_output/kube-rbac-proxy /bin/kube-rbac-proxy
-COPY --from=builder /workspace/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
+COPY --chown=1001:0 --from=builder /workspace/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
 COPY --from=builder /workspace/entrypoint /bin/entrypoint
+
+# Set proper permissions for non-root execution
+RUN chown -R 1001:0 /etc/ssl/private && \
+    chmod -R g=u /etc/ssl/private && \
+    chown 1001:0 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint && \
+    chmod 755 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint
+
+USER 1001
 
 LABEL org.opencontainers.image.licenses=MIT \
       org.opencontainers.image.description="A reverse proxy that provides authentication with Google, Azure, OpenID Connect and many more identity providers." \
