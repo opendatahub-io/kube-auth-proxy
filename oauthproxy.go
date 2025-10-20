@@ -816,6 +816,26 @@ func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// redactSensitiveQueryParams redacts sensitive query parameters from a URL for safe logging
+func redactSensitiveQueryParams(rawURL string) string {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "[invalid URL]"
+	}
+
+	query := parsedURL.Query()
+	sensitiveParams := []string{"id_token_hint", "id_token", "access_token", "refresh_token"}
+	
+	for _, param := range sensitiveParams {
+		if query.Has(param) {
+			query.Set(param, "[REDACTED]")
+		}
+	}
+
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String()
+}
+
 // frontendLogout handles browser-based logout by redirecting to the IdP logout endpoint
 func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState, fallbackRedirect string) {
 	// Try to get the logout URL (cached or discovered)
@@ -839,7 +859,7 @@ func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, s
 		logger.Printf("SignOut: Redirecting to OIDC logout without id_token_hint")
 	}
 
-	logger.Printf("SignOut: Using logout URL: %s", logoutURL)
+	logger.Printf("SignOut: Using logout URL: %s", redactSensitiveQueryParams(logoutURL))
 	http.Redirect(rw, req, logoutURL, http.StatusFound)
 }
 

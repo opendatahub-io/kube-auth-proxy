@@ -3470,3 +3470,59 @@ func TestGetOAuthRedirectURI(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactSensitiveQueryParams(t *testing.T) {
+	tests := []struct {
+		name     string
+		inputURL string
+		want     string
+	}{
+		{
+			name:     "redacts id_token_hint parameter",
+			inputURL: "https://example.com/logout?id_token_hint=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+			want:     "https://example.com/logout?id_token_hint=%5BREDACTED%5D",
+		},
+		{
+			name:     "redacts id_token parameter",
+			inputURL: "https://example.com/logout?id_token=secret_token",
+			want:     "https://example.com/logout?id_token=%5BREDACTED%5D",
+		},
+		{
+			name:     "redacts access_token parameter",
+			inputURL: "https://example.com/logout?access_token=secret_access_token",
+			want:     "https://example.com/logout?access_token=%5BREDACTED%5D",
+		},
+		{
+			name:     "redacts refresh_token parameter",
+			inputURL: "https://example.com/logout?refresh_token=secret_refresh_token",
+			want:     "https://example.com/logout?refresh_token=%5BREDACTED%5D",
+		},
+		{
+			name:     "redacts multiple sensitive parameters",
+			inputURL: "https://example.com/logout?id_token_hint=token1&state=abc&access_token=token2",
+			want:     "https://example.com/logout?access_token=%5BREDACTED%5D&id_token_hint=%5BREDACTED%5D&state=abc",
+		},
+		{
+			name:     "leaves non-sensitive parameters unchanged",
+			inputURL: "https://example.com/logout?state=abc123&redirect_uri=https://example.com/callback",
+			want:     "https://example.com/logout?redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&state=abc123",
+		},
+		{
+			name:     "handles URL with no query parameters",
+			inputURL: "https://example.com/logout",
+			want:     "https://example.com/logout",
+		},
+		{
+			name:     "handles invalid URL",
+			inputURL: "://invalid url",
+			want:     "[invalid URL]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactSensitiveQueryParams(tt.inputURL)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
