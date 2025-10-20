@@ -867,28 +867,66 @@ func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, s
 func (p *OAuthProxy) discoverLogoutURL() (string, error) {
 	providerData := p.provider.Data()
 
-	// Try to get the issuer URL from the provider
-	// For OIDC providers, we can construct the .well-known URL
-	var issuerURL string
-
-	// Try to get issuer from the provider's login URL (common pattern)
-	if providerData.LoginURL != nil {
-		// Extract issuer from login URL (e.g., https://keycloak.example.com/realms/myrealm/protocol/openid-connect/auth -> https://keycloak.example.com/realms/myrealm)
-		loginURLStr := providerData.LoginURL.String()
-		if strings.Contains(loginURLStr, "/protocol/openid-connect/auth") {
-			issuerURL = strings.Replace(loginURLStr, "/protocol/openid-connect/auth", "", 1)
-		}
-	}
-
-	if issuerURL == "" {
+	// Validate that LoginURL is available and properly formatted
+	if providerData.LoginURL == nil {
 		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
 	}
 
-	// Construct .well-known URL
-	wellKnownURL := issuerURL + "/.well-known/openid-configuration"
+	loginURL := providerData.LoginURL
+	
+	// Ensure LoginURL has HTTPS scheme and a host for security
+	if loginURL.Scheme != "https" {
+		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
+	}
+	if loginURL.Host == "" {
+		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
+	}
 
-	// Fetch the discovery document
-	resp, err := http.Get(wellKnownURL)
+	// Derive issuer URL by parsing and manipulating the login URL
+	// For Keycloak OIDC: https://host/realms/realm/protocol/openid-connect/auth -> https://host/realms/realm
+	issuerURL := &url.URL{
+		Scheme: loginURL.Scheme,
+		Host:   loginURL.Host,
+	}
+
+	// Trim known OIDC path segments to get the issuer
+	loginPath := loginURL.Path
+	if strings.HasSuffix(loginPath, "/protocol/openid-connect/auth") {
+		issuerURL.Path = strings.TrimSuffix(loginPath, "/protocol/openid-connect/auth")
+	} else {
+		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
+	}
+
+	// Construct .well-known URL using proper URL methods
+	wellKnownPath := strings.TrimSuffix(issuerURL.Path, "/") + "/.well-known/openid-configuration"
+	wellKnownURL := &url.URL{
+		Scheme: issuerURL.Scheme,
+		Host:   issuerURL.Host,
+		Path:   wellKnownPath,
+	}
+
+	// Verify well-known URL host matches login URL host to prevent SSRF
+	if wellKnownURL.Host != loginURL.Host {
+		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
+	}
+
+	// Create HTTP client with timeout to prevent hanging requests
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Create request with context and timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wellKnownURLStr := wellKnownURL.String()
+	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownURLStr, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch OIDC discovery document: %v", err)
+	}
+
+	// #nosec G107 -- wellKnownURL host validated to match provider LoginURL host and using timeout
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch OIDC discovery document: %v", err)
 	}
