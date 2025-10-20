@@ -912,11 +912,11 @@ func (p *OAuthProxy) discoverLogoutURL() (string, error) {
 
 	// Create HTTP client with timeout to prevent hanging requests
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 30 * time.Second,
 	}
 
 	// Create request with context and timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	wellKnownURLStr := wellKnownURL.String()
