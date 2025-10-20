@@ -825,7 +825,7 @@ func redactSensitiveQueryParams(rawURL string) string {
 
 	query := parsedURL.Query()
 	sensitiveParams := []string{"id_token_hint", "id_token", "access_token", "refresh_token"}
-	
+
 	for _, param := range sensitiveParams {
 		if query.Has(param) {
 			query.Set(param, "[REDACTED]")
@@ -873,7 +873,7 @@ func (p *OAuthProxy) discoverLogoutURL() (string, error) {
 	}
 
 	loginURL := providerData.LoginURL
-	
+
 	// Ensure LoginURL has HTTPS scheme and a host for security
 	if loginURL.Scheme != "https" {
 		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
