@@ -39,7 +39,7 @@ require (
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.16.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	k8s.io/apimachinery v0.33.3
+	k8s.io/apimachinery v0.34.2
 )
 
 require (
