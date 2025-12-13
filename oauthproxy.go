@@ -406,6 +406,18 @@ func buildSessionChain(opts *options.Options, provider providers.Provider, sessi
 				provider.CreateSessionFromToken,
 			}
 			chain = chain.Append(middleware.NewOAuthSessionLoader(oauthSessionLoaders, opts.BearerTokenLoginFallback))
+
+			// OpenShift: Also add JWT loader for Kubernetes service account tokens
+			// Service account tokens are JWTs and need extra-jwt-issuers to be configured
+			// with the cluster's OIDC issuer URL for validation
+			if len(opts.GetJWTBearerVerifiers()) > 0 {
+				jwtSessionLoaders := []middlewareapi.TokenToSessionFunc{}
+				for _, verifier := range opts.GetJWTBearerVerifiers() {
+					jwtSessionLoaders = append(jwtSessionLoaders,
+						middlewareapi.CreateTokenToSessionFunc(verifier.Verify))
+				}
+				chain = chain.Append(middleware.NewJwtSessionLoader(jwtSessionLoaders, opts.BearerTokenLoginFallback))
+			}
 		} else {
 			// OIDC: JWT loader for JWT tokens
 			jwtSessionLoaders := []middlewareapi.TokenToSessionFunc{
