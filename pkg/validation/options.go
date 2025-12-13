@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/mbland/hmacauth"
@@ -15,7 +16,10 @@ import (
 	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
+	"golang.org/x/oauth2"
 )
+
+const providerTypeOpenShift = "openshift"
 
 // Validate checks that required options are set and validates those that they
 // are of the correct format
@@ -54,6 +58,38 @@ func Validate(o *options.Options) error {
 	if o.SkipJwtBearerTokens {
 		// Configure extra issuers
 		if len(o.ExtraJwtIssuers) > 0 {
+			// For OpenShift provider with extra JWT issuers, try to load the Kubernetes
+			// service account CA if no explicit CA files are provided. This allows JWT
+			// verifiers to connect to the in-cluster Kubernetes API for JWKS fetching.
+			// Silently skip if the file doesn't exist (e.g., running off-cluster).
+			if o.Providers[0].Type == providerTypeOpenShift &&
+				len(o.Providers[0].CAFiles) == 0 &&
+				!o.SSLInsecureSkipVerify {
+				serviceAccountCAPath := "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+				if _, err := os.Stat(serviceAccountCAPath); err == nil {
+					pool, err := util.GetCertPool(
+						[]string{serviceAccountCAPath},
+						o.Providers[0].UseSystemTrustStore,
+					)
+					if err == nil {
+						transport := requests.DefaultTransport.(*http.Transport)
+						transport.TLSClientConfig = &tls.Config{
+							RootCAs:    pool,
+							MinVersion: tls.VersionTLS12,
+						}
+						logger.Printf("Auto-loaded Kubernetes service account CA for JWT verification: %s",
+							serviceAccountCAPath)
+					} else {
+						logger.Printf("WARNING: Failed to load Kubernetes service account CA (%s): %v",
+							serviceAccountCAPath, err)
+					}
+				} else {
+					logger.Printf("WARNING: Kubernetes service account CA not found at %s. "+
+						"JWT verification against in-cluster Kubernetes API may fail. "+
+						"Consider setting --ca-file or --use-system-trust-store.", serviceAccountCAPath)
+				}
+			}
+
 			var jwtIssuers []jwtIssuer
 			jwtIssuers, msgs = parseJwtIssuers(o.ExtraJwtIssuers, msgs)
 			for _, jwtIssuer := range jwtIssuers {
@@ -150,13 +186,17 @@ func newVerifierFromJwtIssuer(audienceClaims []string, extraAudiences []string, 
 		IssuerURL:      jwtIssuer.issuerURI,
 	}
 
-	pv, err := internaloidc.NewProviderVerifier(context.TODO(), pvOpts)
+	// Create a context with the configured HTTP client that has the proper CA certificates
+	// This is required for the go-oidc library to use our TLS configuration when fetching JWKS
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, requests.DefaultHTTPClient)
+
+	pv, err := internaloidc.NewProviderVerifier(ctx, pvOpts)
 	if err != nil {
 		// If the discovery didn't work, try again without discovery
 		pvOpts.JWKsURL = strings.TrimSuffix(jwtIssuer.issuerURI, "/") + "/.well-known/jwks.json"
 		pvOpts.SkipDiscovery = true
 
-		pv, err = internaloidc.NewProviderVerifier(context.TODO(), pvOpts)
+		pv, err = internaloidc.NewProviderVerifier(ctx, pvOpts)
 		if err != nil {
 			return nil, fmt.Errorf("could not construct provider verifier for JWT Issuer: %v", err)
 		}

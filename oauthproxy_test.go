@@ -3471,6 +3471,28 @@ func TestGetOAuthRedirectURI(t *testing.T) {
 	}
 }
 
+func TestBuildSessionChainWithOpenShiftAndJWTVerifiers(t *testing.T) {
+	keyset := NoOpKeySet{}
+	verifier := oidc.NewVerifier("https://kubernetes.default.svc", keyset,
+		&oidc.Config{ClientID: "https://kubernetes.default.svc", SkipExpiryCheck: true, SkipClientIDCheck: true})
+	verificationOptions := internaloidc.IDTokenVerificationOptions{
+		AudienceClaims: []string{"aud"},
+		ClientID:       "https://kubernetes.default.svc",
+		ExtraAudiences: []string{},
+	}
+	internalVerifier := internaloidc.NewVerifier(verifier, verificationOptions)
+
+	test, err := NewAuthOnlyEndpointTest("", func(opts *options.Options) {
+		opts.SkipJwtBearerTokens = true
+		opts.SetJWTBearerVerifiers(append(opts.GetJWTBearerVerifiers(), internalVerifier))
+	})
+	require.NoError(t, err)
+
+	assert.NotNil(t, test.proxy)
+	assert.True(t, test.opts.SkipJwtBearerTokens)
+	assert.Len(t, test.opts.GetJWTBearerVerifiers(), 1)
+}
+
 func TestRedactSensitiveQueryParams(t *testing.T) {
 	tests := []struct {
 		name     string
