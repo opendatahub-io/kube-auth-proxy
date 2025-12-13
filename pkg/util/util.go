@@ -3,11 +3,13 @@ package util
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -190,4 +192,92 @@ func RemoveDuplicateStr(strSlice []string) []string {
 		}
 	}
 	return list
+}
+
+const (
+	// ServiceAccountCAPath is the path to the Kubernetes service account CA certificate
+	ServiceAccountCAPath = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	// ServiceAccountTokenPath is the path to the Kubernetes service account token
+	ServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101
+	// ServiceAccountNamespacePath is the path to the Kubernetes service account namespace
+	ServiceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	// kubernetesDefaultService is the default Kubernetes service DNS name
+	kubernetesDefaultService = "kubernetes.default.svc"
+)
+
+// GetKubernetesAPIHost returns the Kubernetes API server host from environment
+// variables (KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT) or falls back
+// to the default service DNS name (kubernetes.default.svc).
+func GetKubernetesAPIHost() string {
+	host := kubernetesDefaultService
+
+	if h := os.Getenv("KUBERNETES_SERVICE_HOST"); h != "" {
+		// Handle IPv6 addresses
+		if strings.Contains(h, ":") {
+			h = "[" + h + "]"
+		}
+		host = h
+	}
+
+	if port := os.Getenv("KUBERNETES_SERVICE_PORT"); port != "" {
+		host = host + ":" + port
+	}
+
+	return host
+}
+
+// GetKubernetesAPIURL constructs a URL for the Kubernetes API with the given path.
+func GetKubernetesAPIURL(path string) string {
+	return "https://" + GetKubernetesAPIHost() + path
+}
+
+// NewKubernetesHTTPClient creates an HTTP client configured with the appropriate
+// CA certificates for connecting to the Kubernetes API server.
+// If caFiles is empty, it defaults to the service account CA.
+// If useSystemTrustStore is true, system root CAs are also included.
+// If insecureSkipVerify is true, TLS certificate verification is disabled.
+func NewKubernetesHTTPClient(caFiles []string, useSystemTrustStore, insecureSkipVerify bool) (*http.Client, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		// #nosec G402 -- InsecureSkipVerify is a configurable option
+		InsecureSkipVerify: insecureSkipVerify,
+	}
+
+	if !insecureSkipVerify {
+		capaths := caFiles
+		if len(capaths) == 0 {
+			capaths = []string{ServiceAccountCAPath}
+		}
+
+		var pool *x509.CertPool
+		if useSystemTrustStore {
+			if systemPool, err := x509.SystemCertPool(); err == nil {
+				pool = systemPool
+			} else {
+				pool = x509.NewCertPool()
+			}
+		} else {
+			pool = x509.NewCertPool()
+		}
+
+		for _, caPath := range capaths {
+			caPEM, err := os.ReadFile(caPath) // #nosec G304 - CA paths are configurable
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA file %s: %v", caPath, err)
+			}
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("failed to parse CA certificate from %s", caPath)
+			}
+		}
+
+		tlsConfig.RootCAs = pool
+	}
+
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
+			TLSClientConfig: tlsConfig,
+		},
+		Timeout: 1 * time.Minute,
+	}, nil
 }

@@ -154,6 +154,32 @@ metadata:
     serviceaccounts.openshift.io/oauth-redirectreference.kube-auth-proxy: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"kube-auth-proxy"}}'
 
 ---
+# ClusterRole for reading OpenShift authentication config (required for --trust-openshift-service-account-issuer)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-auth-proxy-authentication-reader
+rules:
+- apiGroups: ["config.openshift.io"]
+  resources: ["authentications"]
+  verbs: ["get"]
+
+---
+# ClusterRoleBinding to allow the service account to read authentication config
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-auth-proxy-authentication-reader
+subjects:
+- kind: ServiceAccount
+  name: kube-auth-proxy
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: kube-auth-proxy-authentication-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
 # Example upstream application for testing
 apiVersion: apps/v1
 kind: Deployment

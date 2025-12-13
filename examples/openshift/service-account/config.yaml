@@ -45,6 +45,11 @@ data:
   # TLS Configuration - uses automatic service account CA
   use-system-trust-store: "true"
 
+  # Service Account Token Authentication
+  # When enabled, auto-discovers the OpenShift service account issuer and trusts
+  # JWT tokens issued by it. This allows Kubernetes service accounts to authenticate.
+  # Requires RBAC permission to read authentication.config.openshift.io/cluster
+  trust-openshift-service-account-issuer: "true"
 ---
 apiVersion: v1
 kind: Secret
