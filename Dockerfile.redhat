@@ -76,11 +76,18 @@ COPY --from=builder /workspace/kube-rbac-proxy/_output/kube-rbac-proxy /bin/kube
 COPY --from=builder /workspace/entrypoint /bin/entrypoint
 COPY --chown=1001:0 --from=builder /workspace/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
 
+# Copy license files
+RUN mkdir -p /licenses
+COPY --from=builder /workspace/LICENSE /licenses/LICENSE.kube-auth-proxy.txt
+COPY --from=builder /workspace/kube-rbac-proxy/LICENSE /licenses/LICENSE.kube-rbac-proxy.txt
+
 # Set proper permissions for non-root execution
 RUN chown -R 1001:0 /etc/ssl/private && \
     chmod -R g=u /etc/ssl/private && \
     chown 1001:0 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint && \
-    chmod 755 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint
+    chmod 755 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint && \
+    chown -R 1001:0 /licenses && \
+    chmod -R 644 /licenses/*
 
 USER 1001
 
