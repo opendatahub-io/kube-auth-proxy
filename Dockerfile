@@ -27,8 +27,6 @@ COPY . .
 # Setup kube-rbac-proxy dependencies
 WORKDIR /workspace/kube-rbac-proxy
 RUN go mod download
-# Generate vendor directory at build time instead of committing to git
-RUN go mod vendor
 
 # Go back to main workdir
 WORKDIR /workspace
@@ -63,7 +61,7 @@ RUN case ${TARGETPLATFORM} in \
     GOARCH=${GOARCH} VERSION=${VERSION} make build && touch jwt_signing_key.pem && \
     printf "Building kube-rbac-proxy for arch ${GOARCH}\n" && \
     VERSION_SEMVER=$(echo "${VERSION}" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "v0.19.1") && \
-    cd kube-rbac-proxy && GOFLAGS="-mod=vendor" GOARCH=${GOARCH} VERSION="${VERSION}" VERSION_SEMVER="${VERSION_SEMVER}" make build && \
+    cd kube-rbac-proxy && GOARCH=${GOARCH} VERSION="${VERSION}" VERSION_SEMVER="${VERSION_SEMVER}" make build && \
     cd .. && printf "Building entrypoint for arch ${GOARCH}\n" && \
     CGO_ENABLED=0 GOARCH=${GOARCH} go build -a -installsuffix cgo -o entrypoint ./cmd/entrypoint
 
