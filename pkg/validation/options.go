@@ -3,9 +3,12 @@ package validation
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/mbland/hmacauth"
@@ -15,6 +18,12 @@ import (
 	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
+	"golang.org/x/oauth2"
+)
+
+const (
+	// OpenShift authentication config API path
+	authenticationConfigPath = "/apis/config.openshift.io/v1/authentications/cluster"
 )
 
 // Validate checks that required options are set and validates those that they
@@ -51,22 +60,58 @@ func Validate(o *options.Options) error {
 			"\n      use email-domain=* to authorize all email addresses")
 	}
 
-	if o.SkipJwtBearerTokens {
-		// Configure extra issuers
-		if len(o.ExtraJwtIssuers) > 0 {
-			var jwtIssuers []jwtIssuer
-			jwtIssuers, msgs = parseJwtIssuers(o.ExtraJwtIssuers, msgs)
-			for _, jwtIssuer := range jwtIssuers {
-				verifier, err := newVerifierFromJwtIssuer(
-					o.Providers[0].OIDCConfig.AudienceClaims,
-					o.Providers[0].OIDCConfig.ExtraAudiences,
-					jwtIssuer,
+	if o.TrustOpenShiftServiceAccountIssuer {
+		issuer, err := discoverOpenShiftServiceAccountIssuer(
+			o.Providers[0].CAFiles,
+			o.Providers[0].UseSystemTrustStore,
+			o.SSLInsecureSkipVerify,
+		)
+		if err != nil {
+			msgs = append(msgs, fmt.Sprintf(
+				"failed to discover OpenShift service account issuer: %v", err))
+		} else {
+			logger.Printf("Auto-discovered OpenShift service account issuer: %s", issuer)
+			o.ExtraJwtIssuers = append(o.ExtraJwtIssuers, issuer+"="+issuer)
+			o.SkipJwtBearerTokens = true
+		}
+	}
+
+	if o.SkipJwtBearerTokens && len(o.ExtraJwtIssuers) > 0 {
+		// Auto-load service account CA for in-cluster JWKS fetching if no CA configured.
+		// Skip if SSLInsecureSkipVerify is set or explicit CA files are provided.
+		if !o.SSLInsecureSkipVerify && len(o.Providers[0].CAFiles) == 0 {
+			if _, err := os.Stat(util.ServiceAccountCAPath); err == nil {
+				pool, err := util.GetCertPool(
+					[]string{util.ServiceAccountCAPath},
+					o.Providers[0].UseSystemTrustStore,
 				)
-				if err != nil {
-					msgs = append(msgs, fmt.Sprintf("error building verifiers: %s", err))
+				if err == nil {
+					transport := requests.DefaultTransport.(*http.Transport)
+					transport.TLSClientConfig = &tls.Config{
+						RootCAs:    pool,
+						MinVersion: tls.VersionTLS12,
+					}
+					logger.Printf("Auto-loaded Kubernetes service account CA for JWT verification: %s",
+						util.ServiceAccountCAPath)
+				} else {
+					logger.Printf("WARNING: Failed to load Kubernetes service account CA (%s): %v",
+						util.ServiceAccountCAPath, err)
 				}
-				o.SetJWTBearerVerifiers(append(o.GetJWTBearerVerifiers(), verifier))
 			}
+		}
+
+		var jwtIssuers []jwtIssuer
+		jwtIssuers, msgs = parseJwtIssuers(o.ExtraJwtIssuers, msgs)
+		for _, jwtIssuer := range jwtIssuers {
+			verifier, err := newVerifierFromJwtIssuer(
+				o.Providers[0].OIDCConfig.AudienceClaims,
+				o.Providers[0].OIDCConfig.ExtraAudiences,
+				jwtIssuer,
+			)
+			if err != nil {
+				msgs = append(msgs, fmt.Sprintf("error building verifiers: %s", err))
+			}
+			o.SetJWTBearerVerifiers(append(o.GetJWTBearerVerifiers(), verifier))
 		}
 	}
 
@@ -150,13 +195,17 @@ func newVerifierFromJwtIssuer(audienceClaims []string, extraAudiences []string, 
 		IssuerURL:      jwtIssuer.issuerURI,
 	}
 
-	pv, err := internaloidc.NewProviderVerifier(context.TODO(), pvOpts)
+	// Create a context with the configured HTTP client that has the proper CA certificates
+	// This is required for the go-oidc library to use our TLS configuration when fetching JWKS
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, requests.DefaultHTTPClient)
+
+	pv, err := internaloidc.NewProviderVerifier(ctx, pvOpts)
 	if err != nil {
 		// If the discovery didn't work, try again without discovery
 		pvOpts.JWKsURL = strings.TrimSuffix(jwtIssuer.issuerURI, "/") + "/.well-known/jwks.json"
 		pvOpts.SkipDiscovery = true
 
-		pv, err = internaloidc.NewProviderVerifier(context.TODO(), pvOpts)
+		pv, err = internaloidc.NewProviderVerifier(ctx, pvOpts)
 		if err != nil {
 			return nil, fmt.Errorf("could not construct provider verifier for JWT Issuer: %v", err)
 		}
@@ -169,6 +218,59 @@ func newVerifierFromJwtIssuer(audienceClaims []string, extraAudiences []string, 
 type jwtIssuer struct {
 	issuerURI string
 	audience  string
+}
+
+// discoverOpenShiftServiceAccountIssuer fetches the service account issuer from
+// the OpenShift authentication.config.openshift.io/cluster resource.
+// If the issuer is not explicitly configured, it defaults to https://kubernetes.default.svc.
+func discoverOpenShiftServiceAccountIssuer(caFiles []string, useSystemTrustStore, insecureSkipVerify bool) (string, error) {
+	authConfigURL := util.GetKubernetesAPIURL(authenticationConfigPath)
+
+	token, err := os.ReadFile(util.ServiceAccountTokenPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read service account token: %v", err)
+	}
+
+	client, err := util.NewKubernetesHTTPClient(caFiles, useSystemTrustStore, insecureSkipVerify)
+	if err != nil {
+		return "", fmt.Errorf("failed to create Kubernetes HTTP client: %v", err)
+	}
+
+	req, err := http.NewRequest("GET", authConfigURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch authentication config: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("authentication config request failed with status %d: %s",
+			resp.StatusCode, string(body))
+	}
+
+	var authConfig struct {
+		Spec struct {
+			ServiceAccountIssuer string `json:"serviceAccountIssuer"`
+		} `json:"spec"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&authConfig); err != nil {
+		return "", fmt.Errorf("failed to parse authentication config: %v", err)
+	}
+
+	issuer := authConfig.Spec.ServiceAccountIssuer
+	if issuer == "" {
+		// Default to the in-cluster Kubernetes API server when not explicitly configured
+		issuer = "https://kubernetes.default.svc"
+	}
+
+	return issuer, nil
 }
 
 func parseURL(toParse string, urltype string, msgs []string) (*url.URL, []string) {

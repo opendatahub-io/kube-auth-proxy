@@ -20,6 +20,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 )
 
 const (
@@ -33,14 +34,6 @@ const (
 	// OpenShift API paths
 	openShiftUserInfoPath       = "/apis/user.openshift.io/v1/users/~"
 	openShiftOAuthDiscoveryPath = "/.well-known/oauth-authorization-server"
-
-	// Kubernetes service account paths
-	serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-	serviceAccountTokenPath     = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101
-	serviceAccountCAPath        = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-
-	// Default Kubernetes service DNS name
-	kubernetesDefaultService = "kubernetes.default.svc"
 )
 
 // OpenShiftProvider implements OAuth2 authentication for OpenShift clusters.
@@ -89,7 +82,7 @@ func NewOpenShiftProvider(p *ProviderData, cfg options.Provider) (*OpenShiftProv
 
 	// Set default validateURL if not already configured
 	if p.ValidateURL == nil || p.ValidateURL.String() == "" {
-		discoveredURL, err := url.Parse(getKubeAPIURLWithPath(openShiftUserInfoPath))
+		discoveredURL, err := url.Parse(util.GetKubernetesAPIURL(openShiftUserInfoPath))
 		if err != nil {
 			return nil, fmt.Errorf("failed to auto-detect validate URL: %v", err)
 		}
@@ -397,7 +390,7 @@ func (p *OpenShiftProvider) ValidateSession(ctx context.Context, s *sessions.Ses
 func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 	capaths := p.CAFiles
 	if len(capaths) == 0 {
-		capaths = []string{serviceAccountCAPath}
+		capaths = []string{util.ServiceAccountCAPath}
 	}
 
 	// Check if DefaultTransport has InsecureSkipVerify set (from --ssl-insecure-skip-verify flag)
@@ -459,7 +452,7 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 
 // discoverOpenShiftOAuth discovers OAuth endpoints from the well-known endpoint
 func (p *OpenShiftProvider) discoverOpenShiftOAuth(client *http.Client) (*url.URL, *url.URL, error) {
-	wellKnownURL := getKubeAPIURLWithPath(openShiftOAuthDiscoveryPath)
+	wellKnownURL := util.GetKubernetesAPIURL(openShiftOAuthDiscoveryPath)
 	logger.Printf("Performing OAuth discovery against %s", wellKnownURL)
 
 	req, err := http.NewRequest("GET", wellKnownURL, nil)
@@ -507,29 +500,6 @@ func (p *OpenShiftProvider) discoverOpenShiftOAuth(client *http.Client) (*url.UR
 	return loginURL, redeemURL, nil
 }
 
-// getKubeAPIURLWithPath constructs a URL for the Kubernetes API with the given path.
-// It uses environment variables KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT
-// for auto-detection when running inside a cluster, falling back to the default
-// Kubernetes service DNS name.
-func getKubeAPIURLWithPath(path string) string {
-	scheme := "https"
-	host := kubernetesDefaultService
-
-	if h := os.Getenv("KUBERNETES_SERVICE_HOST"); len(h) > 0 {
-		// assume IPv6 if host contains colons
-		if strings.IndexByte(h, ':') != -1 {
-			h = "[" + h + "]"
-		}
-		host = h
-	}
-
-	if port := os.Getenv("KUBERNETES_SERVICE_PORT"); len(port) > 0 {
-		host = host + ":" + port
-	}
-
-	return scheme + "://" + host + path
-}
-
 // loadServiceAccountDefaults loads OAuth client defaults from the mounted service account.
 // This function reads the service account namespace and token files that are automatically
 // mounted by Kubernetes when the proxy runs as a pod.
@@ -540,14 +510,14 @@ func loadServiceAccountDefaults(serviceAccount, clientSecretFile string) (client
 	}
 
 	// Read namespace from mounted service account
-	if data, err := os.ReadFile(serviceAccountNamespacePath); err == nil && len(data) > 0 {
+	if data, err := os.ReadFile(util.ServiceAccountNamespacePath); err == nil && len(data) > 0 {
 		namespace := strings.TrimSpace(string(data))
 		clientID = fmt.Sprintf("system:serviceaccount:%s:%s", namespace, serviceAccount)
 		logger.Printf("Auto-detected client-id from service account: %s", clientID)
 	}
 
 	// Determine which token file to use
-	tokenPath := serviceAccountTokenPath
+	tokenPath := util.ServiceAccountTokenPath
 	if clientSecretFile != "" {
 		tokenPath = clientSecretFile
 		logger.Printf("Using custom client-secret-file: %s", tokenPath)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -98,7 +99,7 @@ func TestOpenShiftProviderGetKubeAPIURLWithPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getKubeAPIURLWithPath(tt.path)
+			result := util.GetKubernetesAPIURL(tt.path)
 			assert.Equal(t, tt.expectedURL, result)
 		})
 	}
@@ -256,7 +257,7 @@ func TestDiscoverValidateURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setupEnv()
 
-			result, err := url.Parse(getKubeAPIURLWithPath(openShiftUserInfoPath))
+			result, err := url.Parse(util.GetKubernetesAPIURL(openShiftUserInfoPath))
 			require.NoError(t, err)
 
 			if tt.expectNil {

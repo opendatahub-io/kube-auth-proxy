@@ -399,6 +399,7 @@ func buildSessionChain(opts *options.Options, provider providers.Provider, sessi
 
 	if opts.SkipJwtBearerTokens {
 		_, isOpenShift := provider.(*providers.OpenShiftProvider)
+		verifiers := opts.GetJWTBearerVerifiers()
 
 		if isOpenShift {
 			// OpenShift: OAuth loader for sha256~ tokens
@@ -406,12 +407,19 @@ func buildSessionChain(opts *options.Options, provider providers.Provider, sessi
 				provider.CreateSessionFromToken,
 			}
 			chain = chain.Append(middleware.NewOAuthSessionLoader(oauthSessionLoaders, opts.BearerTokenLoginFallback))
-		} else {
-			// OIDC: JWT loader for JWT tokens
-			jwtSessionLoaders := []middlewareapi.TokenToSessionFunc{
-				provider.CreateSessionFromToken,
+		}
+
+		// Add JWT loader when not OpenShift, or for OpenShift when verifiers are configured
+		// (service account tokens need extra-jwt-issuers with the cluster's OIDC issuer URL)
+		if !isOpenShift || len(verifiers) > 0 {
+			jwtSessionLoaders := []middlewareapi.TokenToSessionFunc{}
+
+			if !isOpenShift {
+				// OIDC: JWT loader for JWT tokens
+				jwtSessionLoaders = append(jwtSessionLoaders, provider.CreateSessionFromToken)
 			}
-			for _, verifier := range opts.GetJWTBearerVerifiers() {
+
+			for _, verifier := range verifiers {
 				jwtSessionLoaders = append(jwtSessionLoaders,
 					middlewareapi.CreateTokenToSessionFunc(verifier.Verify))
 			}

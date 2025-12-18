@@ -189,3 +189,52 @@ func TestProviderCAFilesError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to load provider CA file(s)")
 }
+
+func TestValidationWithoutJWTIssuersDoesNotRequireServiceAccountCA(t *testing.T) {
+	o := testOptions()
+
+	err := Validate(o)
+	assert.NoError(t, err)
+}
+
+func TestValidationWithSkipJwtBearerTokensButNoIssuers(t *testing.T) {
+	o := testOptions()
+	o.SkipJwtBearerTokens = true
+
+	err := Validate(o)
+	assert.NoError(t, err)
+}
+
+func TestValidationWithExplicitCAFilesSkipsServiceAccountCAAutoLoad(t *testing.T) {
+	caFile, err := os.CreateTemp("", "ca.*.crt")
+	assert.NoError(t, err)
+	defer os.Remove(caFile.Name())
+
+	dummyCert := `-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQDU+pQ4P2DxFzANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAls
+b2NhbGhvc3QwHhcNMjMwMTAxMDAwMDAwWhcNMjQwMTAxMDAwMDAwWjAUMRIwEAYD
+VQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7
+o5e7CnJzr7jHGxqJLGHZDkWaOQwFv8nG0FHjqZgucuCKv7wWHrHC6VvpH8R8fNlS
+GqZTCcRTgGjJ9JQ9l7eFNi0S6J5J9xM+FuLRdJBJ8l6x+Qs0qlYFqbELdGQTZjPk
+pQ5tKlvj5N7TvGq/+HlbQfnvGzl6k1aNnT3cOP0FlHrB/kKYw5n8cP0BPPBLdIfH
+jXpT0dZWRbWKmBnp5nSA+B/YbC2bfG7xmJJrgQwPosrfB6nnD/AE6rJf8EYFNwB7
+lM6tAd9zC5cQoQfQ4Mg7+mFqPRGW7cj0nBvFn1yvYRlh0n1kkjVGpYTzq3jHHEuF
+0lPB5GG9Y6P/n0bL7q6vAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAKIsTw/px+AR
+RkP5+PBr4wOTxH8ROLPY9Ec/wgVDZMH5j7H0jgAAy1SY0zCTvKwmHvBr6SY0+/TV
+Y+rTzKjLNckv1Y8vRVbJ1N3d7nL5G8nuAHBr7J4oDg5g6RB0EULRvf6n1Js8rl1N
+cE8bVvSvBLWytJzY1GqHA/VdRv0B/z+w/r5r+ajT1UEZU5AHKhDjJR2Y/BLHXriL
+rJDznp1LL9RkXL8L+HPKI5x2Pj6BL/xXFN0FVjB2AhYun0Y+bjFrC4cNyWOCmwVA
+hNgL+YR8eE5t0nlfSrpjIJsT0KC/wj1D7PEjzXMH4PPzzeSa4YPPF7h2Jrz8R7v/
+7E8ouS3gzj0=
+-----END CERTIFICATE-----`
+	_, err = caFile.WriteString(dummyCert)
+	assert.NoError(t, err)
+	assert.NoError(t, caFile.Close())
+
+	o := testOptions()
+	o.Providers[0].CAFiles = []string{caFile.Name()}
+	o.SkipJwtBearerTokens = true
+
+	err = Validate(o)
+	assert.NoError(t, err)
+}
