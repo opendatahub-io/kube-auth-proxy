@@ -34,8 +34,11 @@ type k8sTokenSessionLoader struct {
 func (l *k8sTokenSessionLoader) loadSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		scope := middlewareapi.GetRequestScope(req)
-		// If scope is nil, this will panic.
-		// A scope should always be injected before this handler is called.
+		if scope == nil {
+			logger.Errorf("Internal server error: request scope is nil. Middleware chain may be misconfigured.")
+			http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 
 		// Skip if session already loaded by previous loader
 		if scope.Session != nil {
