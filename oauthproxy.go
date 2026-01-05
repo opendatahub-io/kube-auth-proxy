@@ -96,7 +96,7 @@ type OAuthProxy struct {
 	ProxyPrefix          string
 	basicAuthValidator   basic.Validator
 	basicAuthGroups      []string
-	k8sTokenValidator    *k8s.TokenReviewValidator // optional, can be nil
+	k8sTokenValidator    k8s.Validator // optional, can be nil
 	SkipProviderButton   bool
 	skipAuthPreflight    bool
 	skipJwtBearerTokens  bool
@@ -120,7 +120,7 @@ type OAuthProxy struct {
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
-func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenValidator *k8s.TokenReviewValidator) (*OAuthProxy, error) {
+func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenValidator k8s.Validator) (*OAuthProxy, error) {
 	sessionStore, err := sessions.NewSessionStore(&opts.Session, &opts.Cookie)
 	if err != nil {
 		return nil, fmt.Errorf("error initialising session store: %v", err)
@@ -397,7 +397,7 @@ func buildPreAuthChain(opts *options.Options, sessionStore sessionsapi.SessionSt
 	return chain, nil
 }
 
-func buildSessionChain(opts *options.Options, provider providers.Provider, sessionStore sessionsapi.SessionStore, validator basic.Validator, k8sTokenValidator *k8s.TokenReviewValidator) alice.Chain {
+func buildSessionChain(opts *options.Options, provider providers.Provider, sessionStore sessionsapi.SessionStore, validator basic.Validator, k8sTokenValidator k8s.Validator) alice.Chain {
 	chain := alice.New()
 
 	// Kubernetes service account token validation (independent of provider choice!)

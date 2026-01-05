@@ -14,6 +14,11 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
 )
 
+// Validator defines the interface for validating Kubernetes service account tokens.
+type Validator interface {
+	ValidateToken(ctx context.Context, token string) (*sessions.SessionState, error)
+}
+
 // TokenReviewValidator validates Kubernetes service account tokens using the TokenReview API.
 // This is independent of the configured provider (OpenShift OAuth, OIDC, etc.)
 // and allows service accounts to authenticate alongside human users.
