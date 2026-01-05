@@ -14,7 +14,7 @@ import (
 // Kubernetes service account tokens using the TokenReview API.
 // This loader is independent of the configured provider (OpenShift OAuth, OIDC, etc.)
 // and allows service accounts to authenticate via bearer tokens alongside human users.
-func NewK8sTokenSessionLoader(validator *k8s.TokenReviewValidator) alice.Constructor {
+func NewK8sTokenSessionLoader(validator k8s.Validator) alice.Constructor {
 	loader := &k8sTokenSessionLoader{
 		validator: validator,
 	}
@@ -24,7 +24,7 @@ func NewK8sTokenSessionLoader(validator *k8s.TokenReviewValidator) alice.Constru
 // k8sTokenSessionLoader attempts to load sessions from Kubernetes service account tokens
 // in Authorization headers. It uses the TokenReview API to validate tokens.
 type k8sTokenSessionLoader struct {
-	validator *k8s.TokenReviewValidator
+	validator k8s.Validator
 }
 
 // loadSession attempts to load a session from a Kubernetes service account token
