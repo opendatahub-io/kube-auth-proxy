@@ -80,8 +80,8 @@ func TestK8sTokenAuthentication_InvalidToken(t *testing.T) {
 
 	proxy.ServeHTTP(rw, req)
 
-	// Should redirect to login (no valid session)
-	assert.Equal(t, http.StatusFound, rw.Code)
+	// Should return 403 (no valid session, no LoginURL configured in test)
+	assert.Equal(t, http.StatusForbidden, rw.Code)
 }
 
 func TestK8sTokenAuthentication_NoToken(t *testing.T) {
@@ -105,8 +105,8 @@ func TestK8sTokenAuthentication_NoToken(t *testing.T) {
 
 	proxy.ServeHTTP(rw, req)
 
-	// Should redirect to login
-	assert.Equal(t, http.StatusFound, rw.Code)
+	// Should return 403 (no valid session, no LoginURL configured in test)
+	assert.Equal(t, http.StatusForbidden, rw.Code)
 }
 
 func TestK8sTokenAuthentication_NilValidator(t *testing.T) {
@@ -124,8 +124,8 @@ func TestK8sTokenAuthentication_NilValidator(t *testing.T) {
 
 	proxy.ServeHTTP(rw, req)
 
-	// Should fall through to other auth (redirect to login)
-	assert.Equal(t, http.StatusFound, rw.Code)
+	// Should fall through to other auth (return 403, no LoginURL configured)
+	assert.Equal(t, http.StatusForbidden, rw.Code)
 }
 
 func TestK8sTokenAuthentication_FallbackToOIDC(t *testing.T) {
@@ -151,8 +151,8 @@ func TestK8sTokenAuthentication_FallbackToOIDC(t *testing.T) {
 	proxy.ServeHTTP(rw, req)
 
 	// K8s validation fails, should fall through to OIDC/OAuth validation
-	// In this test setup, that will also fail and redirect
-	assert.Equal(t, http.StatusFound, rw.Code)
+	// In this test setup, that will also fail and return 403 (no LoginURL)
+	assert.Equal(t, http.StatusForbidden, rw.Code)
 }
 
 func TestK8sTokenAuthentication_APIServerDown(t *testing.T) {
@@ -176,6 +176,6 @@ func TestK8sTokenAuthentication_APIServerDown(t *testing.T) {
 
 	proxy.ServeHTTP(rw, req)
 
-	// Should fall through to other auth methods (will redirect to login)
-	assert.Equal(t, http.StatusFound, rw.Code)
+	// Should fall through to other auth methods (will return 403, no LoginURL configured)
+	assert.Equal(t, http.StatusForbidden, rw.Code)
 }
