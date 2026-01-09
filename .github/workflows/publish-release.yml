@@ -13,7 +13,35 @@ permissions:
   pull-requests: write
 
 jobs:
-  
+  publish:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get_tag.outputs.tag }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get tag from PR
+        id: get_tag
+        run: |
+          # Extract tag from PR branch name or title
+          TAG="${{ github.event.pull_request.head.ref }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Creating release for tag: $TAG"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.get_tag.outputs.tag }}" \
+            --title "${{ steps.get_tag.outputs.tag }}" \
+            --notes "Release ${{ steps.get_tag.outputs.tag }}" \
+            --target ${{ github.event.pull_request.head.sha }}
+
   docker:
     needs: publish
     runs-on: ubuntu-latest

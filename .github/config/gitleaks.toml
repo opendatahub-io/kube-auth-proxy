@@ -1,0 +1,24 @@
+# Gitleaks configuration for kube-auth-proxy
+# Documentation: https://github.com/gitleaks/gitleaks#configuration
+
+title = "Gitleaks configuration for kube-auth-proxy"
+
+[allowlist]
+description = "Allowlisted files - test fixtures and local development configs"
+
+# Exclude paths using regex patterns
+paths = [
+  # All Go test files (contain mock credentials)
+  '''.*_test\.go$''',
+
+  # Local development environment configs (OAuth2 proxy, Dex, Keycloak)
+  '''contrib/local-environment/.*''',
+
+  # Example files (contain JWT tokens and test configs for documentation)
+  '''.*examples/.*''',
+
+  # E2E test fixtures
+  '''kube-rbac-proxy/test/e2e/.*'''
+]
+
+# No custom rules needed - using Gitleaks defaults
