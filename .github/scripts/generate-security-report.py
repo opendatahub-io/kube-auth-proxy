@@ -593,11 +593,17 @@ class SecurityReportGenerator:
             # actionlint uses this format for all findings
             pattern = r'^(.+?):(\d+):(\d+):\s+(.+?)(?:\s+\[(.+?)\])?$'
 
+            # Regex to strip ANSI color codes (e.g., \x1b[31m for red, \x1b[0m for reset)
+            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+
             for line in content.splitlines():
                 if not line.strip():
                     continue
 
-                match = re.match(pattern, line)
+                # Strip ANSI color codes before pattern matching
+                clean_line = ansi_escape.sub('', line)
+
+                match = re.match(pattern, clean_line)
                 if not match:
                     continue
 
@@ -606,7 +612,7 @@ class SecurityReportGenerator:
 
                 # Map severity based on message content
                 # GitHub Actions security issues are generally MEDIUM (workflow errors can break CI/CD)
-                severity = 'medium'
+                severity = 'MEDIUM'
                 severity_bucket = 'medium'
 
                 # Upgrade to HIGH for security-related issues
