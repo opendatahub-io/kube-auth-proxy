@@ -1076,11 +1076,20 @@ def main():
     args = parser.parse_args()
 
     # Gather GitHub context from environment
+    server_url = os.getenv('GITHUB_SERVER_URL', '')
+    repository = os.getenv('GITHUB_REPOSITORY', '')
+    run_id = os.getenv('GITHUB_RUN_ID', '')
+
+    if server_url and repository and run_id:
+        run_url = f"{server_url}/{repository}/actions/runs/{run_id}"
+    else:
+        run_url = 'N/A'
+
     github_context = {
-        'repository': os.getenv('GITHUB_REPOSITORY', 'unknown'),
+        'repository': repository or 'unknown',
         'sha': os.getenv('GITHUB_SHA', 'unknown'),
         'ref_name': os.getenv('GITHUB_REF_NAME', 'unknown'),
-        'run_url': f"{os.getenv('GITHUB_SERVER_URL', '')}/{os.getenv('GITHUB_REPOSITORY', '')}/actions/runs/{os.getenv('GITHUB_RUN_ID', '')}"
+        'run_url': run_url
     }
 
     try:
