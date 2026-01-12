@@ -342,12 +342,19 @@ jobs:
       # ============================================================================
       # DOCKERFILE SECURITY - Hadolint
       # ============================================================================
-      # Tool: Hadolint v3.3.0
+      # Tool: Hadolint v2.14.0
       # Purpose: Dockerfile linter enforcing best practices
       # Detects: Secrets in ENV, unpinned base images, running as root
       # Coverage: All Dockerfile* files (including Dockerfile.dev, etc.)
       # Standards: Enforces Docker best practices and CIS Benchmark recommendations
       # Output: SARIF format for GitHub Security tab integration
+      #
+      # Docker Image Pinning:
+      # - Git tag: v2.14.0-alpine
+      # - Docker digest: sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
+      # - Why digest?: Immutable reference, prevents tag retargeting attacks
+      # - Source: https://github.com/hadolint/hadolint/pkgs/container/hadolint/versions
+      # - Verification: docker run --rm --entrypoint hadolint ghcr.io/hadolint/hadolint@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c --version
 
       - name: Run Hadolint on Dockerfiles
         id: hadolint
@@ -375,7 +382,7 @@ jobs:
           docker run --rm -i \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            hadolint/hadolint:v2.12.0-alpine \
+            ghcr.io/hadolint/hadolint@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c \
             hadolint --config .github/config/hadolint.yaml --format sarif $DOCKERFILES > hadolint.sarif || true
         continue-on-error: true
 
