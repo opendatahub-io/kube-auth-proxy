@@ -404,7 +404,7 @@ jobs:
       # Coverage: All .yaml and .yml files (manifests, workflows, configs)
       # Benefit: Catches deployment-breaking YAML errors before runtime
       # Output: parsable format (file:line:col: [level] message (rule))
-      # Note: JSON format not supported - PR #245 never merged
+      # Note: JSON format not yet supported - PR #442 in progress
 
       - name: Install yamllint
         if: steps.config.outputs.run_yamllint == 'true'
