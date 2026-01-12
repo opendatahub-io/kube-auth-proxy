@@ -39,10 +39,14 @@ jobs:
 
     - name: Build and push main image
       run: |
-        # Build Docker image tagged as 'main'
-        make build-docker-all IMAGE_TAG=main
+        # Build and push Docker images with 'main' tag
+        make build-docker-all VERSION=main
+        make push-docker-all VERSION=main
 
-    - name: Push main image
+    - name: Build and push SHA-tagged image
       run: |
-        # Push to quay.io/opendatahub with 'main' tag
-        make push-docker-all IMAGE_TAG=main
+        # Build and push Docker images with commit SHA for traceability
+        SHORT_SHA="${{ github.sha }}"
+        SHORT_SHA="${SHORT_SHA:0:7}"
+        make build-docker-all VERSION="${SHORT_SHA}"
+        make push-docker-all VERSION="${SHORT_SHA}"
