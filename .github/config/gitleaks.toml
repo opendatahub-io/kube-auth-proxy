@@ -4,18 +4,22 @@
 title = "Gitleaks configuration for kube-auth-proxy"
 
 [allowlist]
-description = "Allowlisted files - test fixtures and local development configs"
+description = "Allowlisted files - test fixtures, mock data, and local development configs"
 
 # Exclude paths using regex patterns
 paths = [
-  # All Go test files (contain mock credentials)
+  # All testdata directories (contain mock Kubernetes secrets, test configs)
+  '''.*/testdata/.*''',
+
+  # All test files (may contain mock credentials for testing)
   '''.*_test\.go$''',
+  '''.*_mock\.go$''',
+
+  # Example files (contain JWT tokens and test configs for documentation)
+  '''.*/examples/.*''',
 
   # Local development environment configs (OAuth2 proxy, Dex, Keycloak)
   '''contrib/local-environment/.*''',
-
-  # Example files (contain JWT tokens and test configs for documentation)
-  '''.*examples/.*''',
 
   # E2E test fixtures
   '''kube-rbac-proxy/test/e2e/.*'''

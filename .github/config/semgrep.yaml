@@ -59,6 +59,7 @@ paths:
     - "contrib/**"            # Contributed scripts and local development configs
     - "**/testdata/**"        # Test fixture data with mock secrets
     - "**/*_test.go"          # Go test files with mock credentials
+    - "**/*_mock.go"          # Go mock files with test data
     - "test/**"               # Test directories
     - "docs/**"               # Documentation with example code snippets
     - "bin/**"                # Compiled binaries
