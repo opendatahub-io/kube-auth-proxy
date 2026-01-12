@@ -25,7 +25,7 @@ import sys
 import argparse
 import re
 import hashlib
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -710,7 +710,7 @@ class SecurityReportGenerator:
             with open(output_file, 'w') as f:
                 # Header
                 f.write(f"# Comprehensive Security Scan Report\n\n")
-                f.write(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n")
+                f.write(f"**Generated:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n")
                 f.write(f"**Repository:** {self.github.get('repository', 'unknown')}\n\n")
                 f.write(f"**Commit:** {self.github.get('sha', 'unknown')}\n\n")
                 f.write(f"**Branch:** {self.github.get('ref_name', 'unknown')}\n\n")
@@ -974,7 +974,7 @@ class SecurityReportGenerator:
 
         summary = {
             'format_version': '1.0',
-            'generated': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'generated': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
             'commit': self.github.get('sha', 'unknown'),
             'branch': self.github.get('ref_name', 'unknown'),
             'repository': self.github.get('repository', 'unknown'),
@@ -1011,7 +1011,7 @@ class SecurityReportGenerator:
         try:
             with open(output_file, 'w') as f:
                 f.write(f"# YAMLlint Code Quality Report\n\n")
-                f.write(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+                f.write(f"**Generated:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
                 f.write(f"**Repository:** {self.github.get('repository', 'unknown')}\n\n")
                 f.write(f"**Commit:** {self.github.get('sha', 'unknown')}\n\n")
                 f.write(f"**Branch:** {self.github.get('ref_name', 'unknown')}\n\n")

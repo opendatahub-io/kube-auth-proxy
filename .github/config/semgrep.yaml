@@ -480,14 +480,20 @@ rules:
 
   - id: operator-run-as-root
     patterns:
-      - pattern-not: |
-          securityContext:
-            ...
-            runAsNonRoot: true
-            ...
-      - pattern-inside: |
+      - pattern: |
           kind: Pod
           ...
+          spec:
+            ...
+      - pattern-not: |
+          kind: Pod
+          ...
+          spec:
+            ...
+            securityContext:
+              ...
+              runAsNonRoot: true
+              ...
     message: "Pod missing runAsNonRoot security context. Containers should not run as root."
     severity: WARNING
     languages: [yaml]

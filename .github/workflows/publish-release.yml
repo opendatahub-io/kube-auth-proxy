@@ -33,7 +33,7 @@ jobs:
     - name: Login to quay.io
       uses: docker/login-action@v3
       with:
-        registry: quay.io/opendatahub
+        registry: quay.io
         username: ${{ secrets.QUAY_USERNAME }}
         password: ${{ secrets.QUAY_PASSWORD }}
 
