@@ -119,10 +119,15 @@ class SecurityReportGenerator:
 
         try:
             findings_count = 0
+            parse_errors = 0
             with open(filepath) as f:
                 for line in f:
                     if line.strip():
-                        finding = json.loads(line)
+                        try:
+                            finding = json.loads(line)
+                        except json.JSONDecodeError:
+                            parse_errors += 1
+                            continue
                         findings_count += 1
 
                         self.findings['critical'].append({
@@ -139,6 +144,9 @@ class SecurityReportGenerator:
             stats['findings'] = findings_count
             if findings_count > 0:
                 stats['status'] = '❌ FINDINGS'
+            if parse_errors > 0:
+                # Don't fail the whole tool; surface partial parse issues.
+                stats['status'] = f"⚠️ PARTIAL: {parse_errors} unparsable lines"
 
         except Exception as e:
             stats['status'] = '⚠️ ERROR: Failed to parse TruffleHog output'
