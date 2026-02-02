@@ -31,6 +31,17 @@ type TokenReviewValidator struct {
 // If kubeconfig is empty, it uses in-cluster configuration.
 // The audiences parameter is optional - when empty, tokens are validated against
 // the Kubernetes API server's default issuer and audience (default TokenReview behavior).
+//
+// TLS Configuration:
+// Communication with the Kubernetes API server is automatically secured with TLS.
+// - InClusterConfig() loads the cluster CA certificate from /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+//   (automatically mounted by Kubernetes into every pod) and configures the TLS client config.
+// - BuildConfigFromFlags() loads TLS settings from the kubeconfig file, including the cluster CA certificate.
+// See: https://github.com/kubernetes/client-go/blob/master/rest/config.go
+//
+// Note: There is a known limitation where client-go does not automatically reload CA certificates during
+// cluster CA rotation. Pods may need to be restarted after CA rotation.
+// See: https://github.com/kubernetes/kubernetes/issues/119483
 func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenReviewValidator, error) {
 	var config *rest.Config
 	var err error
