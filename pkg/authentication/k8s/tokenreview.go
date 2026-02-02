@@ -29,7 +29,8 @@ type TokenReviewValidator struct {
 
 // NewTokenReviewValidator creates a new TokenReview validator.
 // If kubeconfig is empty, it uses in-cluster configuration.
-// The audiences parameter specifies required token audiences for validation.
+// The audiences parameter is optional - when empty, tokens are validated against
+// the Kubernetes API server's default issuer and audience (default TokenReview behavior).
 func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenReviewValidator, error) {
 	var config *rest.Config
 	var err error
@@ -58,7 +59,9 @@ func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenRevie
 // ValidateToken validates a service account token using the Kubernetes TokenReview API.
 // It returns a SessionState if the token is valid, or an error if validation fails.
 // The TokenReview API is authoritative - it checks with the Kubernetes API server
-// whether the token is valid, not expired, and matches the required audience.
+// whether the token is valid and not expired. If audiences are configured, it also validates
+// the token matches the required audiences. When audiences are omitted, the default
+// Kubernetes API server issuer and audience validation is used.
 func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) (*sessions.SessionState, error) {
 	tr := &authenticationv1.TokenReview{
 		Spec: authenticationv1.TokenReviewSpec{

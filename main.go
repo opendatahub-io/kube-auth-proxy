@@ -66,7 +66,11 @@ func main() {
 		if err != nil {
 			logger.Fatalf("ERROR: Failed to create K8s TokenReview validator: %v", err)
 		}
-		logger.Printf("K8s service account token validation enabled with audiences: %v", opts.KubernetesAudiences)
+		if len(opts.KubernetesAudiences) > 0 {
+			logger.Printf("K8s service account token validation enabled with audiences: %v", opts.KubernetesAudiences)
+		} else {
+			logger.Printf("K8s service account token validation enabled (using default Kubernetes API server issuer and audience)")
+		}
 	}
 
 	oauthproxy, err := NewOAuthProxy(opts, validator, k8sTokenValidator)

@@ -67,7 +67,7 @@ type Options struct {
 
 	// Kubernetes service account token validation (independent of provider)
 	EnableK8sTokenValidation bool     `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
-	KubernetesAudiences      []string `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"`
+	KubernetesAudiences      []string `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"` // Optional: when empty, uses default K8s API server issuer/audience
 	Kubeconfig               string   `flag:"kubeconfig" cfg:"kubeconfig"`
 
 	SignatureKey    string `flag:"signature-key" cfg:"signature_key"`
@@ -143,7 +143,7 @@ func NewFlagSet() *pflag.FlagSet {
 
 	// Kubernetes service account token validation
 	flagSet.Bool("enable-k8s-token-validation", false, "enable Kubernetes service account token validation via TokenReview API (works alongside configured provider)")
-	flagSet.StringSlice("kubernetes-audiences", []string{}, "required audiences for Kubernetes service account token validation (may be given multiple times)")
+	flagSet.StringSlice("kubernetes-audiences", []string{}, "optional audiences for Kubernetes service account token validation. When omitted, tokens are validated against the Kubernetes API server's default issuer and audience. Any further audience checks should be handled by downstream services (may be given multiple times)")
 	flagSet.String("kubeconfig", "", "path to kubeconfig file for Kubernetes API access (optional, uses in-cluster config if not set)")
 
 	flagSet.StringSlice("email-domain", []string{}, "authenticate emails with the specified domain (may be given multiple times). Use * to authenticate any email")
