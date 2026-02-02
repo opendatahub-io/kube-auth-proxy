@@ -86,9 +86,10 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 	}
 	session.CreatedAtNow()
 
-	// Service account tokens can have expiration, but we set a default session expiry
-	// The actual token expiration is enforced by the TokenReview API on each request
-	session.SetExpiresOn(time.Now().Add(24 * time.Hour))
+	// Service account tokens can have expiration, but we set a short session expiry
+	// since this is a single request session. The actual token expiration is enforced
+	// by the TokenReview API on each request.
+	session.SetExpiresOn(time.Now().Add(30 * time.Second))
 
 	return session, nil
 }
