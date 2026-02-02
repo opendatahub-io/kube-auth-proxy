@@ -62,7 +62,7 @@ func (l *k8sTokenSessionLoader) loadSession(next http.Handler) http.Handler {
 			// TokenReview validation failed
 			// Don't return error - this might be an OIDC token or OpenShift OAuth token
 			// Let the next handler in the chain try to validate it
-			logger.Printf("K8s TokenReview validation failed: %v", err)
+			logger.Errorf("K8s TokenReview validation failed: %v", err)
 			next.ServeHTTP(rw, req)
 			return
 		}
