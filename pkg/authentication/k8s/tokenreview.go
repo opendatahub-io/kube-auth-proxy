@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -87,6 +88,9 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 	}
 
 	if !result.Status.Authenticated {
+		if result.Status.Error != "" {
+			return nil, fmt.Errorf("token not authenticated by TokenReview API: %s", result.Status.Error)
+		}
 		return nil, errors.New("token not authenticated by TokenReview API")
 	}
 
@@ -103,7 +107,7 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 	// Service account tokens can have expiration, but we set a short session expiry
 	// since this is a single request session. The actual token expiration is enforced
 	// by the TokenReview API on each request.
-	session.SetExpiresOn(time.Now().Add(30 * time.Second))
+	session.SetExpiresOn(session.Clock.Now().Add(30 * time.Second))
 
 	return session, nil
 }
