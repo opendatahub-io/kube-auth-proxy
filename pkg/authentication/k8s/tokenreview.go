@@ -35,9 +35,10 @@ type TokenReviewValidator struct {
 //
 // TLS Configuration:
 // Communication with the Kubernetes API server is automatically secured with TLS.
-// - InClusterConfig() loads the cluster CA certificate from /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-//   (automatically mounted by Kubernetes into every pod) and configures the TLS client config.
-// - BuildConfigFromFlags() loads TLS settings from the kubeconfig file, including the cluster CA certificate.
+//   - InClusterConfig() loads the cluster CA certificate from /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+//     (automatically mounted by Kubernetes into every pod) and configures the TLS client config.
+//   - BuildConfigFromFlags() loads TLS settings from the kubeconfig file, including the cluster CA certificate.
+//
 // See: https://github.com/kubernetes/client-go/blob/master/rest/config.go
 //
 // Note: There is a known limitation where client-go does not automatically reload CA certificates during

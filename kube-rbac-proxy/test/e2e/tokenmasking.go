@@ -20,12 +20,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/brancz/kube-rbac-proxy/test/kubetest"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"strings"
-	"testing"
 )
 
 func testTokenMasking(client kubernetes.Interface) kubetest.TestSuite {
