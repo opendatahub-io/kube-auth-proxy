@@ -1,57 +1,59 @@
 {
-  $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  semanticCommits: "enabled",
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  semanticCommits: 'enabled',
   schedule: [
-    "after 8am on sunday"
+    'after 8am on sunday',
   ],
   prConcurrentLimit: 0,
   prHourlyLimit: 0,
   enabledManagers: [
-    "dockerfile",
-    "docker-compose",
-    "gomod",
-    "github-actions",
-    "helmv3",
-    "npm",
-    "regex",
+    'dockerfile',
+    'docker-compose',
+    'gomod',
+    'github-actions',
+    'helmv3',
+    'npm',
+    'custom.regex',
   ],
   packageRules: [
     {
       matchManagers: [
-        "dockerfile",
-        "docker-compose",
-        "gomod",
-        "helmv3",
-        "npm",
+        'dockerfile',
+        'docker-compose',
+        'gomod',
+        'helmv3',
+        'npm',
       ],
-      groupName: "{{{manager}}}",
+      groupName: '{{{manager}}}',
     },
     {
       matchDepNames: [
-        "docker.io/library/golang",
-        "mcr.microsoft.com/vscode/devcontainers/go",
+        'docker.io/library/golang',
+        'mcr.microsoft.com/vscode/devcontainers/go',
       ],
-      groupName: "golang",
+      groupName: 'golang',
     },
   ],
   customManagers: [
     {
-      customType: "regex",
-      fileMatch: [
-        "^Makefile",
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^Makefile/',
       ],
       matchStrings: [
-        "DOCKER_BUILD_RUNTIME_IMAGE_ALPINE\\s+?\\?= alpine:(?<currentValue>.*)\\s"
+        'DOCKER_BUILD_RUNTIME_IMAGE_ALPINE\\s+?\\?= alpine:(?<currentValue>.*)\\s',
       ],
-      depNameTemplate: "alpine",
-      datasourceTemplate: "docker",
+      depNameTemplate: 'alpine',
+      datasourceTemplate: 'docker',
     },
     {
-      customType: "regex",
-      fileMatch: ["(^|/)\\.github/workflows/[^/]+\\.ya?ml$"],
+      customType: 'regex',
+      managerFilePatterns: [
+        '/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/',
+      ],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?\\s+?[\\w\\s-]*?version: (?<currentValue>.*)\\s",
-        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?\\s+?[\\w\\s]*?_VERSION: (?<currentValue>.*)\\s",
+        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?\\s+?[\\w\\s-]*?version: (?<currentValue>.*)\\s',
+        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?\\s+?[\\w\\s]*?_VERSION: (?<currentValue>.*)\\s',
       ],
     },
   ],
