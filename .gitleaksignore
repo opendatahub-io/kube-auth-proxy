@@ -1,0 +1,33 @@
+# .gitleaksignore - Exclude test fixtures and mock data from Gitleaks secret scanning
+#
+# These are mock credentials used in unit tests and should not be flagged as security issues.
+# Real credentials should NEVER be committed to this repository.
+#
+# Documentation: https://github.com/gitleaks/gitleaks#gitleaksignore
+
+# Test data directories with mock credentials
+**/testdata/**/*.yaml
+**/testdata/**/*.yml
+**/testdata/**/*_mock.go
+**/testdata/**/*mock.go
+**/testdata/**/test-*.yaml
+**/testdata/**/test-*.yml
+**/test/**/*.yaml
+**/test/**/*.yml
+**/*_test.go
+
+# Mock credentials in test files
+**/*mock*.json
+**/*fixture*.json
+**/*test*.yaml
+**/*test*.yml
+
+# Example configuration files with placeholder values
+**/examples/**/*.yaml
+**/examples/**/*.yml
+**/config/samples/**/*.yaml
+**/config/samples/**/*.yml
+
+# Note: This file should be reviewed regularly to ensure test data exclusions remain appropriate.
+# Production code and configuration files are still scanned for secrets.
+# Last updated: 2026-01-12

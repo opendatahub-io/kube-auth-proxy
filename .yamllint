@@ -1,0 +1,35 @@
+---
+# ==============================================================================
+# yamllint Configuration
+# ==============================================================================
+#
+# PURPOSE: Validates YAML syntax and style for production code only
+# SCOPE: Excludes test fixtures, examples, documentation, and development files
+#
+# INTEGRATION:
+#   - GitHub Actions: .github/workflows/security-full-scan.yml
+#   - Local usage: yamllint -c .yamllint .
+#
+# PATH EXCLUSIONS: Same as Semgrep and Gitleaks to prevent false positives
+# ==============================================================================
+
+extends: default
+
+ignore: |
+  **/examples/
+  **/contrib/
+  **/scripts/
+  **/testdata/
+  **/test/
+  **/tests/
+  **/docs/
+  **/bin/
+  **/.github/workflows/
+  **/node_modules/
+  **/vendor/
+
+rules:
+  line-length: disable           # Allow long lines (URLs, base64, etc.)
+  document-start: disable         # Don't require --- at file start
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no']  # Strict truthy checking
