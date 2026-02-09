@@ -23,7 +23,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/odh-kube-auth-proxy:v3.3.0
+    value: quay.io/opendatahub/odh-kube-auth-proxy:v3.4-ea.1
   - name: dockerfile
     value: Dockerfile.redhat
   - name: path-context
