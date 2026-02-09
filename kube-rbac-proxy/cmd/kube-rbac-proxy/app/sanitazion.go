@@ -19,8 +19,9 @@ package app
 import (
 	"bytes"
 	"encoding/json"
-	v1 "k8s.io/api/authentication/v1"
 	"strings"
+
+	v1 "k8s.io/api/authentication/v1"
 )
 
 // SanitizingFilter implements the LogFilter interface from klog with custom functions to detect and mask tokens.

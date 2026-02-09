@@ -26,6 +26,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/pagewriter"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/redirect"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/basic"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/k8s"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
 	proxyhttp "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/http"
@@ -95,6 +96,7 @@ type OAuthProxy struct {
 	ProxyPrefix          string
 	basicAuthValidator   basic.Validator
 	basicAuthGroups      []string
+	k8sTokenValidator    k8s.Validator // optional, can be nil
 	SkipProviderButton   bool
 	skipAuthPreflight    bool
 	skipJwtBearerTokens  bool
@@ -118,7 +120,7 @@ type OAuthProxy struct {
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
-func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthProxy, error) {
+func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenValidator k8s.Validator) (*OAuthProxy, error) {
 	sessionStore, err := sessions.NewSessionStore(&opts.Session, &opts.Cookie)
 	if err != nil {
 		return nil, fmt.Errorf("error initialising session store: %v", err)
@@ -205,7 +207,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 	if err != nil {
 		return nil, fmt.Errorf("could not build pre-auth chain: %v", err)
 	}
-	sessionChain := buildSessionChain(opts, provider, sessionStore, basicAuthValidator)
+	sessionChain := buildSessionChain(opts, provider, sessionStore, basicAuthValidator, k8sTokenValidator)
 	headersChain, err := buildHeadersChain(opts)
 	if err != nil {
 		return nil, fmt.Errorf("could not build headers chain: %v", err)
@@ -241,6 +243,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 
 		basicAuthValidator: basicAuthValidator,
 		basicAuthGroups:    opts.HtpasswdUserGroups,
+		k8sTokenValidator:  k8sTokenValidator,
 		sessionChain:       sessionChain,
 		headersChain:       headersChain,
 		preAuthChain:       preAuthChain,
@@ -394,8 +397,14 @@ func buildPreAuthChain(opts *options.Options, sessionStore sessionsapi.SessionSt
 	return chain, nil
 }
 
-func buildSessionChain(opts *options.Options, provider providers.Provider, sessionStore sessionsapi.SessionStore, validator basic.Validator) alice.Chain {
+func buildSessionChain(opts *options.Options, provider providers.Provider, sessionStore sessionsapi.SessionStore, validator basic.Validator, k8sTokenValidator k8s.Validator) alice.Chain {
 	chain := alice.New()
+
+	// Kubernetes service account token validation (independent of provider choice!)
+	// This runs FIRST so service account tokens are validated before other auth methods
+	if k8sTokenValidator != nil {
+		chain = chain.Append(middleware.NewK8sTokenSessionLoader(k8sTokenValidator))
+	}
 
 	if opts.SkipJwtBearerTokens {
 		_, isOpenShift := provider.(*providers.OpenShiftProvider)

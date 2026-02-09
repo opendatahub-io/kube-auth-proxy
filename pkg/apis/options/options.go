@@ -65,6 +65,11 @@ type Options struct {
 	EncodeState              bool     `flag:"encode-state" cfg:"encode_state"`
 	AllowQuerySemicolons     bool     `flag:"allow-query-semicolons" cfg:"allow_query_semicolons"`
 
+	// Kubernetes service account token validation (independent of provider)
+	EnableK8sTokenValidation bool     `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
+	KubernetesAudiences      []string `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"` // Optional: when empty, uses default K8s API server issuer/audience
+	Kubeconfig               string   `flag:"kubeconfig" cfg:"kubeconfig"`
+
 	SignatureKey    string `flag:"signature-key" cfg:"signature_key"`
 	GCPHealthChecks bool   `flag:"gcp-healthchecks" cfg:"gcp_healthchecks"`
 
@@ -135,6 +140,11 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.Bool("encode-state", false, "will encode oauth state with base64")
 	flagSet.Bool("allow-query-semicolons", false, "allow the use of semicolons in query args")
 	flagSet.StringSlice("extra-jwt-issuers", []string{}, "if skip-jwt-bearer-tokens is set, a list of extra JWT issuer=audience pairs (where the issuer URL has a .well-known/openid-configuration or a .well-known/jwks.json)")
+
+	// Kubernetes service account token validation
+	flagSet.Bool("enable-k8s-token-validation", false, "enable Kubernetes service account token validation via TokenReview API (works alongside configured provider)")
+	flagSet.StringSlice("kubernetes-audiences", []string{}, "optional audiences for Kubernetes service account token validation. When omitted, tokens are validated against the Kubernetes API server's default issuer and audience. Any further audience checks should be handled by downstream services (may be given multiple times)")
+	flagSet.String("kubeconfig", "", "path to kubeconfig file for Kubernetes API access (optional, uses in-cluster config if not set)")
 
 	flagSet.StringSlice("email-domain", []string{}, "authenticate emails with the specified domain (may be given multiple times). Use * to authenticate any email")
 	flagSet.StringSlice("whitelist-domain", []string{}, "allowed domains for redirection after authentication. Prefix domain with a . or a *. to allow subdomains (eg .example.com, *.example.com)")

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/k8s"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/validation"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version"
@@ -54,7 +55,25 @@ func main() {
 	}
 
 	validator := NewValidator(opts.EmailDomains, opts.AuthenticatedEmailsFile)
-	oauthproxy, err := NewOAuthProxy(opts, validator)
+
+	// Initialize Kubernetes service account token validator if enabled
+	var k8sTokenValidator *k8s.TokenReviewValidator
+	if opts.EnableK8sTokenValidation {
+		k8sTokenValidator, err = k8s.NewTokenReviewValidator(
+			opts.Kubeconfig,
+			opts.KubernetesAudiences,
+		)
+		if err != nil {
+			logger.Fatalf("ERROR: Failed to create K8s TokenReview validator: %v", err)
+		}
+		if len(opts.KubernetesAudiences) > 0 {
+			logger.Printf("K8s service account token validation enabled with audiences: %v", opts.KubernetesAudiences)
+		} else {
+			logger.Printf("K8s service account token validation enabled (using default Kubernetes API server issuer and audience)")
+		}
+	}
+
+	oauthproxy, err := NewOAuthProxy(opts, validator, k8sTokenValidator)
 	if err != nil {
 		logger.Fatalf("ERROR: Failed to initialise OAuth2 Proxy: %v", err)
 	}
