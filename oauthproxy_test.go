@@ -3526,3 +3526,58 @@ func TestRedactSensitiveQueryParams(t *testing.T) {
 		})
 	}
 }
+
+// TestOAuthCallbackMissingCSRFRedirectsToSignIn verifies that when the OAuth callback
+// is hit without a valid CSRF cookie (e.g. expired or missing after idle), the proxy
+// redirects to the sign-in page with rd and error=cookies.SignInErrorParamCSRFExpired so the user can retry.
+// By default (DisableRedirectOnCSRFError false) the proxy redirects; this test relies on that default.
+func TestOAuthCallbackMissingCSRFRedirectsToSignIn(t *testing.T) {
+	opts := baseTestOptions()
+	opts.EncodeState = false
+	// opts.DisableRedirectOnCSRFError not set → false → redirect on CSRF failure (default)
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	// Valid state format: "nonce:redirect". Redirect "/" is allowed. No CSRF cookie.
+	state := "s2LEyNaz5kZdULSx3d9jmupR1rR5mzhg:/"
+	callbackURL := fmt.Sprintf("/oauth2/callback?code=test-code&state=%s", url.QueryEscape(state))
+
+	req := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	rw := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code, "callback without CSRF cookie should redirect to sign-in")
+	loc := rw.Header().Get("Location")
+	require.NotEmpty(t, loc, "redirect should have Location header")
+	assert.Contains(t, loc, "/oauth2/sign_in", "redirect should go to sign-in page")
+	assert.Contains(t, loc, "error="+cookies.SignInErrorParamCSRFExpired, "redirect should include CSRF-expired error param")
+	assert.Contains(t, loc, "rd=", "redirect should include rd (redirect target)")
+}
+
+// TestOAuthCallbackMissingCSRFReturns403WhenRedirectDisabled verifies that when
+// DisableRedirectOnCSRFError is true, the proxy returns 403 with the error page
+// (with "Go back" button) instead of redirecting.
+func TestOAuthCallbackMissingCSRFReturns403WhenRedirectDisabled(t *testing.T) {
+	opts := baseTestOptions()
+	opts.EncodeState = false
+	opts.DisableRedirectOnCSRFError = true
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	state := "s2LEyNaz5kZdULSx3d9jmupR1rR5mzhg:/"
+	callbackURL := fmt.Sprintf("/oauth2/callback?code=test-code&state=%s", url.QueryEscape(state))
+	req := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	rw := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusForbidden, rw.Code, "callback without CSRF cookie should return 403 when redirect is disabled")
+	body := rw.Body.String()
+	assert.Contains(t, body, "403", "body should be error page")
+	assert.Contains(t, body, "CSRF", "body should mention CSRF")
+}

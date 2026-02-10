@@ -52,18 +52,19 @@ type Options struct {
 
 	Providers Providers `cfg:",internal"`
 
-	APIRoutes                []string `flag:"api-route" cfg:"api_routes"`
-	SkipAuthRegex            []string `flag:"skip-auth-regex" cfg:"skip_auth_regex"`
-	SkipAuthRoutes           []string `flag:"skip-auth-route" cfg:"skip_auth_routes"`
-	SkipJwtBearerTokens      bool     `flag:"skip-jwt-bearer-tokens" cfg:"skip_jwt_bearer_tokens"`
-	BearerTokenLoginFallback bool     `flag:"bearer-token-login-fallback" cfg:"bearer_token_login_fallback"`
-	ExtraJwtIssuers          []string `flag:"extra-jwt-issuers" cfg:"extra_jwt_issuers"`
-	SkipProviderButton       bool     `flag:"skip-provider-button" cfg:"skip_provider_button"`
-	SSLInsecureSkipVerify    bool     `flag:"ssl-insecure-skip-verify" cfg:"ssl_insecure_skip_verify"`
-	SkipAuthPreflight        bool     `flag:"skip-auth-preflight" cfg:"skip_auth_preflight"`
-	ForceJSONErrors          bool     `flag:"force-json-errors" cfg:"force_json_errors"`
-	EncodeState              bool     `flag:"encode-state" cfg:"encode_state"`
-	AllowQuerySemicolons     bool     `flag:"allow-query-semicolons" cfg:"allow_query_semicolons"`
+	APIRoutes                  []string `flag:"api-route" cfg:"api_routes"`
+	SkipAuthRegex              []string `flag:"skip-auth-regex" cfg:"skip_auth_regex"`
+	SkipAuthRoutes             []string `flag:"skip-auth-route" cfg:"skip_auth_routes"`
+	SkipJwtBearerTokens        bool     `flag:"skip-jwt-bearer-tokens" cfg:"skip_jwt_bearer_tokens"`
+	BearerTokenLoginFallback   bool     `flag:"bearer-token-login-fallback" cfg:"bearer_token_login_fallback"`
+	ExtraJwtIssuers            []string `flag:"extra-jwt-issuers" cfg:"extra_jwt_issuers"`
+	SkipProviderButton         bool     `flag:"skip-provider-button" cfg:"skip_provider_button"`
+	DisableRedirectOnCSRFError bool     `flag:"disable-redirect-on-csrf-error" cfg:"disable_redirect_on_csrf_error"`
+	SSLInsecureSkipVerify      bool     `flag:"ssl-insecure-skip-verify" cfg:"ssl_insecure_skip_verify"`
+	SkipAuthPreflight          bool     `flag:"skip-auth-preflight" cfg:"skip_auth_preflight"`
+	ForceJSONErrors            bool     `flag:"force-json-errors" cfg:"force_json_errors"`
+	EncodeState                bool     `flag:"encode-state" cfg:"encode_state"`
+	AllowQuerySemicolons       bool     `flag:"allow-query-semicolons" cfg:"allow_query_semicolons"`
 
 	// Kubernetes service account token validation (independent of provider)
 	EnableK8sTokenValidation bool     `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
@@ -132,6 +133,7 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.StringSlice("skip-auth-route", []string{}, "bypass authentication for requests that match the method & path. Format: method=path_regex OR method!=path_regex. For all methods: path_regex OR !=path_regex")
 	flagSet.StringSlice("api-route", []string{}, "return HTTP 401 instead of redirecting to authentication server if token is not valid. Format: path_regex")
 	flagSet.Bool("skip-provider-button", false, "will skip sign-in-page to directly reach the next step: oauth/start")
+	flagSet.Bool("disable-redirect-on-csrf-error", false, "on OAuth callback CSRF failure, return 403 with error page instead of redirecting to sign-in. Default is to redirect (302); set this when you need the 403 error page with \"Go back\".")
 	flagSet.Bool("skip-auth-preflight", false, "will skip authentication for OPTIONS requests")
 	flagSet.Bool("ssl-insecure-skip-verify", false, "skip validation of certificates presented when using HTTPS providers")
 	flagSet.Bool("skip-jwt-bearer-tokens", false, "will skip requests that have verified JWT bearer tokens (default false)")

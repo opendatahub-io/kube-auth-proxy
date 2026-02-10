@@ -54,6 +54,12 @@
       </div>
       {{ end }}
 
+      {{ if .SignInError }}
+      <div class="block alert">
+        {{.SignInError}}
+      </div>
+      {{ end }}
+
       <form method="GET" action="{{.ProxyPrefix}}/start">
         <input type="hidden" name="rd" value="{{.Redirect}}">
           {{ if .SignInMessage }}

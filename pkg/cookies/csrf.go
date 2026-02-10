@@ -53,6 +53,16 @@ type csrf struct {
 // csrtStateTrim will indicate the length of the state trimmed for the name of the csrf cookie
 const csrfStateLength int = 9
 
+// Sign-in error parameter and message when redirecting after CSRF validation failure
+// (e.g. missing or expired CSRF cookie on OAuth callback). Used by the proxy when
+// building the redirect URL and by the sign-in page when rendering the message.
+const (
+	// SignInErrorParamCSRFExpired is the value for the "error" query parameter.
+	SignInErrorParamCSRFExpired = "csrf_expired"
+	// SignInErrorMessageCSRFExpired is the user-facing message on the sign-in page.
+	SignInErrorMessageCSRFExpired = "Your sign-in session expired. Please sign in again."
+)
+
 // NewCSRF creates a CSRF with random nonces
 func NewCSRF(opts *options.Cookie, codeVerifier string) (CSRF, error) {
 	state, err := encryption.Nonce(32)
@@ -234,7 +244,7 @@ func decodeCSRFCookie(cookie *http.Cookie, opts *options.Cookie) (*csrf, error) 
 		return nil, fmt.Errorf("error getting cookie secret: %v", err)
 	}
 
-	val, t, ok := encryption.Validate(cookie, secret, opts.Expire)
+	val, t, ok := encryption.Validate(cookie, secret, opts.CSRFExpire)
 	if !ok {
 		return nil, errors.New("CSRF cookie failed validation")
 	}

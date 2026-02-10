@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	middlewareapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/middleware"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 )
 
@@ -54,10 +55,17 @@ type signInPageWriter struct {
 
 // WriteSignInPage writes the sign-in page to the given response writer.
 // It uses the redirectURL to be able to set the final destination for the user post login.
+// If the request has error=cookies.SignInErrorParamCSRFExpired, SignInError is set so the template
+// shows the session-expired message. Only visible when the provider button is enabled (--skip-provider-button=false).
 func (s *signInPageWriter) WriteSignInPage(rw http.ResponseWriter, req *http.Request, redirectURL string, statusCode int) {
+	signInError := ""
+	if req.URL.Query().Get("error") == cookies.SignInErrorParamCSRFExpired {
+		signInError = cookies.SignInErrorMessageCSRFExpired
+	}
 	t := struct {
 		ProviderName  string
 		SignInMessage template.HTML
+		SignInError   string
 		StatusCode    int
 		CustomLogin   bool
 		Redirect      string
@@ -68,6 +76,7 @@ func (s *signInPageWriter) WriteSignInPage(rw http.ResponseWriter, req *http.Req
 	}{
 		ProviderName:  s.providerName,
 		SignInMessage: template.HTML(s.signInMessage), // #nosec G203 -- We allow unescaped template.HTML since it is user configured options
+		SignInError:   signInError,
 		StatusCode:    statusCode,
 		CustomLogin:   s.displayLoginForm,
 		Redirect:      redirectURL,
