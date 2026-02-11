@@ -42,6 +42,7 @@ var _ = Describe("Templates", func() {
 
 				// For default sign_in template
 				SignInMessage string
+				SignInError   string
 				ProviderName  string
 				CustomLogin   bool
 				LogoData      string
@@ -60,6 +61,7 @@ var _ = Describe("Templates", func() {
 				Footer:      "<footer>",
 
 				SignInMessage: "<sign-in-message>",
+				SignInError:   "",
 				ProviderName:  "<provider-name>",
 				CustomLogin:   false,
 				LogoData:      "<logo>",
