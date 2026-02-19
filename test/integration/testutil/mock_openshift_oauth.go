@@ -60,7 +60,7 @@ func (m *MockOpenShiftOAuth) UserInfoURL() string {
 // Close shuts down the mock server.
 func (m *MockOpenShiftOAuth) Close() { m.server.Close() }
 
-func (m *MockOpenShiftOAuth) discovery(w http.ResponseWriter, r *http.Request) {
+func (m *MockOpenShiftOAuth) discovery(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 		"issuer":                 m.server.URL,
@@ -123,7 +123,7 @@ func (m *MockOpenShiftOAuth) token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (m *MockOpenShiftOAuth) userInfo(w http.ResponseWriter, r *http.Request) {
+func (m *MockOpenShiftOAuth) userInfo(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 		"kind":       "User",
