@@ -37,7 +37,7 @@ var _ = Describe("Edge Cases", func() {
 			opts := buildOIDCOptions(mockOIDC, upstream.URL())
 			opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 
-			server, _ := startProxyOnListener(opts, ln)
+			server := startProxyOnListener(opts, ln)
 			defer server.Close()
 
 			// Do not follow redirects so we see the exact first response.
@@ -67,7 +67,7 @@ var _ = Describe("Edge Cases", func() {
 			opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 			// No WhitelistDomains → external redirects are never allowed.
 
-			server, _ := startProxyOnListener(opts, ln)
+			server := startProxyOnListener(opts, ln)
 			defer server.Close()
 
 			client := &http.Client{

@@ -75,7 +75,7 @@ var _ = Describe("OIDC OAuth Flow", func() {
 		opts := buildOIDCOptions(mockOIDC, upstream.URL())
 		opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 
-		server, _ := startProxyOnListener(opts, ln)
+		server := startProxyOnListener(opts, ln)
 		defer server.Close()
 
 		client := &http.Client{
@@ -105,7 +105,7 @@ var _ = Describe("OIDC OAuth Flow", func() {
 		opts := buildOIDCOptions(mockOIDC, upstream.URL())
 		opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 
-		server, _ := startProxyOnListener(opts, ln)
+		server := startProxyOnListener(opts, ln)
 		defer server.Close()
 
 		jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})

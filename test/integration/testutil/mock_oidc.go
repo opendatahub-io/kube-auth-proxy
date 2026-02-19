@@ -10,7 +10,7 @@ import (
 type MockOIDC struct {
 	m           *mockoidc.MockOIDC
 	mu          sync.Mutex
-	queuedUsers int
+	addedUsers int
 }
 
 // NewMockOIDC starts a mock OIDC provider.
@@ -31,7 +31,7 @@ func (m *MockOIDC) QueueUser(email, preferredUsername string, groups []string) {
 		Groups:            groups,
 	})
 	m.mu.Lock()
-	m.queuedUsers++
+	m.addedUsers++
 	m.mu.Unlock()
 }
 
@@ -44,11 +44,11 @@ func (m *MockOIDC) ClientID() string { return m.m.ClientID }
 // ClientSecret returns the OAuth2 client secret.
 func (m *MockOIDC) ClientSecret() string { return m.m.ClientSecret }
 
-// QueuedUserCount returns how many users have been queued.
-func (m *MockOIDC) QueuedUserCount() int {
+// AddedUserCount returns the total number of users added via QueueUser.
+func (m *MockOIDC) AddedUserCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.queuedUsers
+	return m.addedUsers
 }
 
 // Close shuts down the mock provider.

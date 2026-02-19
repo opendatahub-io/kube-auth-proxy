@@ -84,7 +84,7 @@ var _ = Describe("OpenShift OAuth Flow", func() {
 		opts := buildOpenShiftOptions(mockOS, upstream.URL())
 		opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 
-		server, _ := startProxyOnListener(opts, ln)
+		server := startProxyOnListener(opts, ln)
 		defer server.Close()
 
 		client := &http.Client{
@@ -107,7 +107,7 @@ var _ = Describe("OpenShift OAuth Flow", func() {
 		opts := buildOpenShiftOptions(mockOS, upstream.URL())
 		opts.RawRedirectURL = proxyURL + "/oauth2/callback"
 
-		server, _ := startProxyOnListener(opts, ln)
+		server := startProxyOnListener(opts, ln)
 		defer server.Close()
 
 		jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
@@ -127,7 +127,7 @@ var _ = Describe("OpenShift OAuth Flow", func() {
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
 
 		// Verify the upstream received the injected headers.
-		user := upstream.LastHeader("X-Forwarded-User")
-		Expect(user).To(Equal("bob"))
+		Expect(upstream.LastHeader("X-Forwarded-User")).To(Equal("bob"))
+		Expect(upstream.LastHeader("X-Forwarded-Email")).To(Equal("bob@example.com"))
 	})
 })

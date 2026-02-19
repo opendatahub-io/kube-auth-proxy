@@ -25,7 +25,7 @@ func TestIntegrationSuite(t *testing.T) {
 // startProxyOnListener starts an httptest server on the given net.Listener and
 // validates opts before creating the proxy. opts.RawRedirectURL must already
 // contain the correct callback URL matching the listener's address.
-func startProxyOnListener(opts *options.Options, ln net.Listener) (*httptest.Server, string) {
+func startProxyOnListener(opts *options.Options, ln net.Listener) *httptest.Server {
 	Expect(validation.Validate(opts)).To(Succeed())
 	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
 	Expect(err).ToNot(HaveOccurred())
@@ -33,7 +33,7 @@ func startProxyOnListener(opts *options.Options, ln net.Listener) (*httptest.Ser
 	server := httptest.NewUnstartedServer(proxy)
 	server.Listener = ln
 	server.Start()
-	return server, server.URL
+	return server
 }
 
 // newFreePortListener allocates a listening socket on a free port and returns

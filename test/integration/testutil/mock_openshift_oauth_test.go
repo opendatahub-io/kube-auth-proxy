@@ -68,12 +68,44 @@ var _ = Describe("MockOpenShiftOAuth", func() {
 		Expect(string(body)).To(ContainSubstring("access_token"))
 	})
 
-	It("user info endpoint returns OpenShift user JSON", func() {
+	It("user info endpoint returns OpenShift user JSON for valid token", func() {
+		// Get a valid token via the full code exchange flow.
+		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}
+		resp, err := client.Get(mock.URL() + "/oauth/authorize?client_id=x&response_type=code&redirect_uri=http://localhost/cb&state=s")
+		Expect(err).ToNot(HaveOccurred())
+		loc, err := resp.Location()
+		Expect(err).ToNot(HaveOccurred())
+		resp.Body.Close()
+
+		form := url.Values{"grant_type": {"authorization_code"}, "code": {loc.Query().Get("code")}, "client_id": {"x"}, "redirect_uri": {"http://localhost/cb"}}
+		tokenResp, err := http.PostForm(mock.URL()+"/oauth/token", form)
+		Expect(err).ToNot(HaveOccurred())
+		var tokenBody struct {
+			AccessToken string `json:"access_token"`
+		}
+		Expect(json.NewDecoder(tokenResp.Body).Decode(&tokenBody)).To(Succeed())
+		tokenResp.Body.Close()
+		Expect(tokenBody.AccessToken).ToNot(BeEmpty())
+
+		// Use the token to call user info.
+		req, err := http.NewRequest("GET", mock.URL()+"/apis/user.openshift.io/v1/users/~", nil)
+		Expect(err).ToNot(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+tokenBody.AccessToken)
+		userResp, err := http.DefaultClient.Do(req)
+		Expect(err).ToNot(HaveOccurred())
+		defer userResp.Body.Close()
+		Expect(userResp.StatusCode).To(Equal(http.StatusOK))
+		body, _ := io.ReadAll(userResp.Body)
+		Expect(string(body)).To(ContainSubstring("testuser"))
+	})
+
+	It("user info endpoint returns 401 for missing or invalid token", func() {
+		// No Authorization header.
 		resp, err := http.Get(mock.URL() + "/apis/user.openshift.io/v1/users/~")
 		Expect(err).ToNot(HaveOccurred())
 		defer resp.Body.Close()
-		Expect(resp.StatusCode).To(Equal(http.StatusOK))
-		body, _ := io.ReadAll(resp.Body)
-		Expect(string(body)).To(ContainSubstring("testuser"))
+		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
 	})
 })

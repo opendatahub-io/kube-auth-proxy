@@ -23,6 +23,6 @@ var _ = Describe("MockOIDC", func() {
 		defer m.Close()
 
 		m.QueueUser("test@example.com", "testuser", []string{"devs"})
-		Expect(m.QueuedUserCount()).To(Equal(1))
+		Expect(m.AddedUserCount()).To(Equal(1))
 	})
 })

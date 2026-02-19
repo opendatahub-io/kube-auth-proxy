@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,6 +24,7 @@ type MockOpenShiftOAuth struct {
 	groups   []string
 	mu       sync.Mutex
 	codes    map[string]bool
+	tokens   map[string]bool
 }
 
 // NewMockOpenShiftOAuth creates and starts a mock OpenShift OAuth server.
@@ -33,6 +35,7 @@ func NewMockOpenShiftOAuth(username, email string, groups ...string) *MockOpenSh
 		email:    email,
 		groups:   groups,
 		codes:    make(map[string]bool),
+		tokens:   make(map[string]bool),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-authorization-server", m.discovery)
@@ -115,15 +118,30 @@ func (m *MockOpenShiftOAuth) token(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid code", http.StatusBadRequest)
 		return
 	}
+	accessToken := fmt.Sprintf("token-%d", time.Now().UnixNano())
+	m.mu.Lock()
+	m.tokens[accessToken] = true
+	m.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
-		"access_token": fmt.Sprintf("token-%d", time.Now().UnixNano()),
+		"access_token": accessToken,
 		"token_type":   "Bearer",
 		"expires_in":   3600,
 	})
 }
 
-func (m *MockOpenShiftOAuth) userInfo(w http.ResponseWriter, _ *http.Request) {
+func (m *MockOpenShiftOAuth) userInfo(w http.ResponseWriter, r *http.Request) {
+	// Validate the Bearer token — returns 401 if missing or not issued by this server.
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	m.mu.Lock()
+	valid := token != "" && m.tokens[token]
+	m.mu.Unlock()
+	if !valid {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 		"kind":       "User",
