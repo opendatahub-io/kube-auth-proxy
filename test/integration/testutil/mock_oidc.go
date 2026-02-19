@@ -8,8 +8,8 @@ import (
 
 // MockOIDC wraps mockoidc.MockOIDC with a simpler test API.
 type MockOIDC struct {
-	m           *mockoidc.MockOIDC
-	mu          sync.Mutex
+	m          *mockoidc.MockOIDC
+	mu         sync.Mutex
 	addedUsers int
 }
 
