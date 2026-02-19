@@ -122,6 +122,11 @@ verify-generate: generate ## Verify command to check if alpha config docs are in
 test: lint ## Run all Go tests
 	GO111MODULE=on $(GO) test $(TESTCOVER) -v -race ./...
 
+.PHONY: test-integration
+test-integration: validate-go-version ## Run integration tests
+	GO111MODULE=on $(GO) test -tags integration -v -race .
+	GO111MODULE=on $(GO) test -v -race ./test/integration/...
+
 .PHONY: release
 release: validate-go-version lint test ## Create a full release for all architectures (binaries and checksums)
 	BINARY=${BINARY} VERSION=${VERSION} ./dist.sh
