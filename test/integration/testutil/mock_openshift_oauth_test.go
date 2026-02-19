@@ -49,10 +49,14 @@ var _ = Describe("MockOpenShiftOAuth", func() {
 		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}}
-		resp, _ := client.Get(mock.URL() + "/oauth/authorize?client_id=x&response_type=code&redirect_uri=http://localhost/cb&state=s")
-		loc, _ := resp.Location()
+		resp, err := client.Get(mock.URL() + "/oauth/authorize?client_id=x&response_type=code&redirect_uri=http://localhost/cb&state=s")
+		Expect(err).ToNot(HaveOccurred())
+		defer resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusFound))
+		loc, err := resp.Location()
+		Expect(err).ToNot(HaveOccurred())
 		code := loc.Query().Get("code")
-		resp.Body.Close()
+		Expect(code).ToNot(BeEmpty())
 
 		// Exchange
 		form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {"x"}, "redirect_uri": {"http://localhost/cb"}}
