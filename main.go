@@ -57,7 +57,7 @@ func main() {
 	validator := NewValidator(opts.EmailDomains, opts.AuthenticatedEmailsFile)
 
 	// Initialize Kubernetes service account token validator if enabled
-	var k8sTokenValidator *k8s.TokenReviewValidator
+	var k8sTokenValidator k8s.Validator
 	if opts.EnableK8sTokenValidation {
 		k8sTokenValidator, err = k8s.NewTokenReviewValidator(
 			opts.Kubeconfig,
