@@ -98,6 +98,7 @@ type OAuthProxy struct {
 	basicAuthGroups      []string
 	k8sTokenValidator    k8s.Validator // optional, can be nil
 	SkipProviderButton   bool
+	redirectOnCSRFError  bool // when true, redirect to sign-in on callback CSRF failure (for ext_authz)
 	skipAuthPreflight    bool
 	skipJwtBearerTokens  bool
 	forceJSONErrors      bool
@@ -237,6 +238,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenV
 		skipJwtBearerTokens:  opts.SkipJwtBearerTokens,
 		realClientIPParser:   opts.GetRealClientIPParser(),
 		SkipProviderButton:   opts.SkipProviderButton,
+		redirectOnCSRFError:  !opts.DisableRedirectOnCSRFError,
 		forceJSONErrors:      opts.ForceJSONErrors,
 		allowQuerySemicolons: opts.AllowQuerySemicolons,
 		trustedIPs:           trustedIPs,
@@ -586,6 +588,31 @@ func (p *OAuthProxy) ErrorPage(rw http.ResponseWriter, req *http.Request, code i
 		AppError:    appError,
 		Messages:    messages,
 	})
+}
+
+// redirectToSignInWithCSRFError redirects the user to the sign-in page when CSRF
+// validation fails on the OAuth callback (e.g. missing or expired CSRF cookie).
+// We redirect (302) here instead of returning 403 with the error page because
+// ext_authz returns the raw response for non-200 (e.g. 403) to the client—the
+// user would see raw HTML instead of the error page with its "Go back" button
+// that would normally let them recover. By redirecting, the client follows to
+// the sign-in page.
+// The rd query param preserves the intended post-login redirect; the error param
+// (cookies.SignInErrorParamCSRFExpired) allows the sign-in page to show a
+// session-expired message when the provider button is enabled (--skip-provider-button=false).
+// When the provider button is skipped, the user is redirected straight to OAuth start.
+func (p *OAuthProxy) redirectToSignInWithCSRFError(rw http.ResponseWriter, req *http.Request, appRedirect string) {
+	redirectTarget := "/"
+	if p.redirectValidator.IsValidRedirect(appRedirect) {
+		redirectTarget = appRedirect
+	}
+	// Never use the OAuth callback path as post-login destination (rd); use "/" instead.
+	callbackPath := p.ProxyPrefix + oauthCallbackPath
+	if redirectTarget == callbackPath || strings.HasPrefix(redirectTarget, callbackPath+"?") {
+		redirectTarget = "/"
+	}
+	signInURL := p.SignInPath + "?rd=" + url.QueryEscape(redirectTarget) + "&error=" + url.QueryEscape(cookies.SignInErrorParamCSRFExpired)
+	http.Redirect(rw, req, signInURL, http.StatusFound)
 }
 
 // IsAllowedRequest is used to check if auth should be skipped for this request
@@ -1092,7 +1119,11 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 		// Try to log the INs and OUTs of OAuthProxy, to be easier to analyse these issues.
 		LoggingCSRFCookiesInOAuthCallback(req, cookieName)
 		logger.Println(req, logger.AuthFailure, "Invalid authentication via OAuth2: unable to obtain CSRF cookie: %s (state=%s)", err, nonce)
-		p.ErrorPage(rw, req, http.StatusForbidden, err.Error(), "Login Failed: Unable to find a valid CSRF token. Please try again.")
+		if p.redirectOnCSRFError {
+			p.redirectToSignInWithCSRFError(rw, req, appRedirect)
+		} else {
+			p.ErrorPage(rw, req, http.StatusForbidden, err.Error(), "Login Failed: Unable to find a valid CSRF token. Please try again.")
+		}
 		return
 	}
 
@@ -1114,7 +1145,11 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 
 	if !csrf.CheckOAuthState(nonce) {
 		logger.PrintAuthf(session.Email, req, logger.AuthFailure, "Invalid authentication via OAuth2: CSRF token mismatch, potential attack")
-		p.ErrorPage(rw, req, http.StatusForbidden, "CSRF token mismatch, potential attack", "Login Failed: Unable to find a valid CSRF token. Please try again.")
+		if p.redirectOnCSRFError {
+			p.redirectToSignInWithCSRFError(rw, req, appRedirect)
+		} else {
+			p.ErrorPage(rw, req, http.StatusForbidden, "CSRF token mismatch, potential attack", "Login Failed: Unable to find a valid CSRF token. Please try again.")
+		}
 		return
 	}
 
