@@ -333,7 +333,7 @@ func NewPassAccessTokenTest(opts PassAccessTokenTestOptions) (*PassAccessTokenTe
 			var payload string
 			switch r.URL.Path {
 			case "/oauth/token":
-				payload = `{"access_token": "my_auth_token"}`
+				payload = `{"access_token": "my_auth_token", "id_token": "my_auth_token"}`
 			default:
 				payload = r.Header.Get("X-Forwarded-Access-Token")
 				if payload == "" {
@@ -369,7 +369,7 @@ func NewPassAccessTokenTest(opts PassAccessTokenTestOptions) (*PassAccessTokenTe
 				Values: []options.HeaderValue{
 					{
 						ClaimSource: &options.ClaimSource{
-							Claim: "access_token",
+							Claim: "id_token",
 						},
 					},
 				},

@@ -82,11 +82,13 @@ func (p *ProviderData) Redeem(ctx context.Context, redirectURL, code, codeVerifi
 	// blindly try json and x-www-form-urlencoded
 	var jsonResponse struct {
 		AccessToken string `json:"access_token"`
+		IDToken     string `json:"id_token"`
 	}
 	err = result.UnmarshalInto(&jsonResponse)
 	if err == nil {
 		return &sessions.SessionState{
 			AccessToken: jsonResponse.AccessToken,
+			IDToken:     jsonResponse.IDToken,
 		}, nil
 	}
 

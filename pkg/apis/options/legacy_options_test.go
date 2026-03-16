@@ -383,7 +383,7 @@ var _ = Describe("Legacy Options", func() {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "access_token",
+						Claim: "id_token",
 					},
 				},
 			},
@@ -459,7 +459,7 @@ var _ = Describe("Legacy Options", func() {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "access_token",
+						Claim: "id_token",
 					},
 				},
 			},

@@ -354,7 +354,7 @@ func getPassAccessTokenHeader() Header {
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim: "access_token",
+					Claim: "id_token",
 				},
 			},
 		},
@@ -441,7 +441,7 @@ func getXAuthRequestAccessTokenHeader() Header {
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim: "access_token",
+					Claim: "id_token",
 				},
 			},
 		},
