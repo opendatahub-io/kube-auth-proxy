@@ -86,6 +86,13 @@ func newProviderDataFromConfig(providerConfig options.Provider) (*ProviderData, 
 			providerConfig.ProfileURL = endpoints.UserInfoURL
 			providerConfig.OIDCConfig.JwksURL = endpoints.JWKsURL
 			p.SupportedCodeChallengeMethods = pkce.CodeChallengeAlgs
+
+			if esURL := pv.Provider().EndSessionURL(); esURL != "" {
+				if parsed, err := url.Parse(esURL); err == nil && parsed.Scheme == "https" {
+					p.EndSessionURL = parsed
+					logger.Printf("Discovered end_session_endpoint: %s", esURL)
+				}
+			}
 		}
 	}
 

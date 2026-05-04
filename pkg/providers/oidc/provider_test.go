@@ -121,6 +121,45 @@ var _ = Describe("Provider", func() {
 
 		Expect(provider.SupportedSigningAlgs()).To(ConsistOf("RS256", "HS256"))
 	})
+
+	It("should extract end_session_endpoint when present in discovery", func() {
+		m, err := mockoidc.NewServer(nil)
+		Expect(err).ToNot(HaveOccurred())
+
+		endSessionURL := "https://idp.example.com/logout"
+		m.AddMiddleware(newEndSessionMiddleware(m, endSessionURL))
+
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(m.Start(ln, nil)).To(Succeed())
+		defer func() {
+			Expect(m.Shutdown()).To(Succeed())
+		}()
+
+		provider, err := NewProvider(context.Background(), m.Issuer(), false)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(provider.EndSessionURL()).To(Equal(endSessionURL))
+	})
+
+	It("should return empty end_session_endpoint when not present in discovery", func() {
+		m, err := mockoidc.NewServer(nil)
+		Expect(err).ToNot(HaveOccurred())
+
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(m.Start(ln, nil)).To(Succeed())
+		defer func() {
+			Expect(m.Shutdown()).To(Succeed())
+		}()
+
+		provider, err := NewProvider(context.Background(), m.Issuer(), false)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(provider.EndSessionURL()).To(BeEmpty())
+	})
 })
 
 func newInvalidIssuerMiddleware(m *mockoidc.MockOIDC) func(http.Handler) http.Handler {
@@ -172,6 +211,26 @@ func newSigningAlgsIssuerMiddleware(m *mockoidc.MockOIDC) func(http.Handler) htt
 				JWKsURL:              m.JWKSEndpoint(),
 				UserInfoURL:          m.UserinfoEndpoint(),
 				SupportedSigningAlgs: []string{"RS256", "HS256"},
+			}
+			data, err := json.Marshal(p)
+			if err != nil {
+				rw.WriteHeader(500)
+			}
+			rw.Write(data)
+		})
+	}
+}
+
+func newEndSessionMiddleware(m *mockoidc.MockOIDC, endSessionURL string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			p := providerJSON{
+				Issuer:        m.Issuer(),
+				AuthURL:       m.AuthorizationEndpoint(),
+				TokenURL:      m.TokenEndpoint(),
+				JWKsURL:       m.JWKSEndpoint(),
+				UserInfoURL:   m.UserinfoEndpoint(),
+				EndSessionURL: endSessionURL,
 			}
 			data, err := json.Marshal(p)
 			if err != nil {

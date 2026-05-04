@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -55,6 +56,11 @@ const (
 	authOnlyPath      = "/auth"
 	userInfoPath      = "/userinfo"
 	staticPathPrefix  = "/static/"
+
+	// OpenShift OAuthAccessToken API
+	oauthAccessTokenAPIPath = "/apis/oauth.openshift.io/v1/oauthaccesstokens" // #nosec G101
+	kubeServiceHost         = "kubernetes.default.svc"
+	sha256Prefix            = "sha256~"
 )
 
 var (
@@ -105,7 +111,6 @@ type OAuthProxy struct {
 	allowQuerySemicolons bool
 	realClientIPParser   ipapi.RealClientIPParser
 	trustedIPs           *ip.NetSet
-	cachedLogoutURL      string
 
 	sessionChain      alice.Chain
 	headersChain      alice.Chain
@@ -785,40 +790,108 @@ func (p *OAuthProxy) UserInfo(rw http.ResponseWriter, req *http.Request) {
 
 // SignOut sends a response to clear the authentication cookie
 func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
-	// Get redirect URL and session in parallel
 	redirect, redirectErr := p.appDirector.GetRedirect(req)
 	session, _ := p.getAuthenticatedSession(rw, req)
 
-	// Handle redirect error
 	if redirectErr != nil {
 		logger.Errorf("Error obtaining redirect: %v", redirectErr)
 		p.ErrorPage(rw, req, http.StatusInternalServerError, redirectErr.Error())
 		return
 	}
 
-	// Clear session cookie
+	// Delete OAuthAccessToken in the background (OpenShift provider only).
+	// This is best-effort and must not block the logout response.
+	if session != nil {
+		accessToken := session.AccessToken
+		go func() {
+			p.deleteOAuthAccessToken(&sessionsapi.SessionState{AccessToken: accessToken})
+		}()
+	}
+
 	if err := p.ClearSessionCookie(rw, req); err != nil {
 		logger.Errorf("Error clearing session cookie: %v", err)
 		p.ErrorPage(rw, req, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Choose logout strategy based on configuration
+	// Backend logout: server-side call to IdP, then redirect
 	providerData := p.provider.Data()
 	if providerData.BackendLogoutURL != "" {
-		// Backend logout: server-side call to IdP
 		p.backendLogout(rw, req)
 		http.Redirect(rw, req, redirect, http.StatusFound)
 		return
 	}
 
-	// Frontend logout: redirect browser to IdP logout endpoint (OIDC only)
-	if p.isOIDCProvider() {
-		p.frontendLogout(rw, req, session, redirect)
-	} else {
-		// For non-OIDC providers, use simple redirect
-		http.Redirect(rw, req, redirect, http.StatusFound)
+	// OIDC frontend logout: redirect browser to IdP's end_session_endpoint
+	// so the IdP can clear its SSO session. Same approach as OCP console.
+	if p.supportsRPInitiatedLogout() {
+		p.frontendLogout(rw, req, session)
+		return
 	}
+
+	http.Redirect(rw, req, redirect, http.StatusFound)
+}
+
+// deleteOAuthAccessToken deletes the OAuthAccessToken resource from the cluster
+// when using the OpenShift provider. This matches what the OCP console does on logout.
+// Reference: https://github.com/openshift/console/pull/6445
+// For sha256~ prefixed tokens, the resource name is the sha256 hash of the raw
+// token part, not the bearer token itself.
+func (p *OAuthProxy) deleteOAuthAccessToken(session *sessionsapi.SessionState) {
+	if session.AccessToken == "" {
+		return
+	}
+
+	openshiftProvider, ok := p.provider.(*providers.OpenShiftProvider)
+	if !ok {
+		return
+	}
+
+	tokenName := session.AccessToken
+	if strings.HasPrefix(tokenName, sha256Prefix) {
+		tokenName = tokenToObjectName(tokenName)
+	}
+
+	deleteURL := fmt.Sprintf("%s://%s%s/%s", schemeHTTPS, kubeServiceHost, oauthAccessTokenAPIPath, url.PathEscape(tokenName))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
+	if err != nil {
+		logger.Errorf("SignOut: failed to create OAuthAccessToken delete request: %v", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+session.AccessToken)
+
+	client, err := openshiftProvider.NewHTTPClient()
+	if err != nil {
+		logger.Errorf("SignOut: failed to create HTTP client for OAuthAccessToken deletion: %v", err)
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Errorf("SignOut: failed to delete OAuthAccessToken: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+		logger.Printf("SignOut: deleted OAuthAccessToken (status %d)", resp.StatusCode)
+	} else {
+		logger.Errorf("SignOut: failed to delete OAuthAccessToken: status %d", resp.StatusCode)
+	}
+}
+
+// tokenToObjectName converts a sha256~ prefixed bearer token to its
+// OAuthAccessToken resource name. The resource name is sha256~<base64url(sha256(raw))>
+// where raw is the token with the sha256~ prefix stripped.
+// Reference: https://github.com/openshift/console/pull/6431
+func tokenToObjectName(token string) string {
+	raw := strings.TrimPrefix(token, sha256Prefix)
+	h := sha256.Sum256([]byte(raw))
+	return sha256Prefix + base64.RawURLEncoding.EncodeToString(h[:])
 }
 
 func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
@@ -872,150 +945,41 @@ func redactSensitiveQueryParams(rawURL string) string {
 	return parsedURL.String()
 }
 
-// frontendLogout handles browser-based logout by redirecting to the IdP logout endpoint
-func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState, fallbackRedirect string) {
-	// Try to get the logout URL (cached or discovered)
+// frontendLogout redirects the browser to the IdP's end_session_endpoint
+// so the IdP can clear its SSO session. The local session cookie is already
+// cleared by the caller. This matches the OCP console logout approach.
+func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState) {
 	logoutURL := p.getLogoutURL()
 	if logoutURL == "" {
-		// Fallback: simple redirect if no logout URL available
-		logger.Printf("SignOut: No logout URL available, using fallback redirect")
-		http.Redirect(rw, req, fallbackRedirect, http.StatusFound)
+		logger.Printf("SignOut: No logout URL available, redirecting to /")
+		http.Redirect(rw, req, "/", http.StatusFound)
 		return
 	}
 
-	// Add id_token_hint if session and token are available
 	if session != nil && session.IDToken != "" {
 		separator := "?"
 		if strings.Contains(logoutURL, "?") {
 			separator = "&"
 		}
 		logoutURL += separator + "id_token_hint=" + url.QueryEscape(session.IDToken)
-		logger.Printf("SignOut: Redirecting to OIDC logout with id_token_hint")
-	} else {
-		logger.Printf("SignOut: Redirecting to OIDC logout without id_token_hint")
 	}
 
-	logger.Printf("SignOut: Using logout URL: %s", redactSensitiveQueryParams(logoutURL))
+	logger.Printf("SignOut: Redirecting to IdP logout: %s", redactSensitiveQueryParams(logoutURL))
 	http.Redirect(rw, req, logoutURL, http.StatusFound)
 }
 
-// discoverLogoutURL fetches the logout URL from OIDC .well-known endpoint
-func (p *OAuthProxy) discoverLogoutURL() (string, error) {
-	providerData := p.provider.Data()
-
-	// Validate that LoginURL is available and properly formatted
-	if providerData.LoginURL == nil {
-		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
-	}
-
-	loginURL := providerData.LoginURL
-
-	// Ensure LoginURL has HTTPS scheme and a host for security
-	if loginURL.Scheme != "https" {
-		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
-	}
-	if loginURL.Host == "" {
-		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
-	}
-
-	// Derive issuer URL by parsing and manipulating the login URL
-	// For Keycloak OIDC: https://host/realms/realm/protocol/openid-connect/auth -> https://host/realms/realm
-	issuerURL := &url.URL{
-		Scheme: loginURL.Scheme,
-		Host:   loginURL.Host,
-	}
-
-	// Trim known OIDC path segments to get the issuer
-	loginPath := loginURL.Path
-	if strings.HasSuffix(loginPath, "/protocol/openid-connect/auth") {
-		issuerURL.Path = strings.TrimSuffix(loginPath, "/protocol/openid-connect/auth")
-	} else {
-		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
-	}
-
-	// Construct .well-known URL using proper URL methods
-	wellKnownPath := strings.TrimSuffix(issuerURL.Path, "/") + "/.well-known/openid-configuration"
-	wellKnownURL := &url.URL{
-		Scheme: issuerURL.Scheme,
-		Host:   issuerURL.Host,
-		Path:   wellKnownPath,
-	}
-
-	// Verify well-known URL host matches login URL host to prevent SSRF
-	if wellKnownURL.Host != loginURL.Host {
-		return "", fmt.Errorf("could not determine issuer URL for OIDC discovery")
-	}
-
-	// Create HTTP client with timeout to prevent hanging requests
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	// Create request with context and timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	wellKnownURLStr := wellKnownURL.String()
-	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownURLStr, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch OIDC discovery document: %v", err)
-	}
-
-	// #nosec G107 -- wellKnownURL host validated to match provider LoginURL host and using timeout
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch OIDC discovery document: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OIDC discovery document returned status %d", resp.StatusCode)
-	}
-
-	// Parse the JSON response
-	var discovery struct {
-		EndSessionEndpoint string `json:"end_session_endpoint"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
-		return "", fmt.Errorf("failed to parse OIDC discovery document: %v", err)
-	}
-
-	if discovery.EndSessionEndpoint == "" {
-		return "", fmt.Errorf("end_session_endpoint not found in OIDC discovery document")
-	}
-
-	logger.Printf("Discovered OIDC logout URL: %s", discovery.EndSessionEndpoint)
-	return discovery.EndSessionEndpoint, nil
-}
-
-// getLogoutURL returns the cached logout URL or discovers it if not cached
+// getLogoutURL returns the end_session_endpoint discovered at startup.
 func (p *OAuthProxy) getLogoutURL() string {
-	// Check if we have a cached logout URL
-	if p.cachedLogoutURL != "" {
-		return p.cachedLogoutURL
+	if esURL := p.provider.Data().EndSessionURL; esURL != nil {
+		return esURL.String()
 	}
-
-	// Discover and cache the logout URL
-	if logoutURL, err := p.discoverLogoutURL(); err == nil && logoutURL != "" {
-		p.cachedLogoutURL = logoutURL
-		return logoutURL
-	}
-
-	// Return empty string if discovery fails
 	return ""
 }
 
-// isOIDCProvider checks if the current provider is OIDC-based
-func (p *OAuthProxy) isOIDCProvider() bool {
-	providerData := p.provider.Data()
-	// Check if this is an OIDC provider by looking for OIDC-specific URLs
-	// OIDC providers typically have login URLs ending with /protocol/openid-connect/auth
-	if providerData.LoginURL != nil {
-		loginURL := providerData.LoginURL.String()
-		return strings.Contains(loginURL, "/protocol/openid-connect/auth")
-	}
-	return false
+// supportsRPInitiatedLogout checks if the current provider supports RP-initiated logout
+// by verifying that end_session_endpoint was discovered during startup.
+func (p *OAuthProxy) supportsRPInitiatedLogout() bool {
+	return p.provider.Data().EndSessionURL != nil
 }
 
 // OAuthStart starts the OAuth2 authentication flow

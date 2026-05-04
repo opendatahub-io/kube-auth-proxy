@@ -16,6 +16,7 @@ type providerJSON struct {
 	TokenURL             string   `json:"token_endpoint"`
 	JWKsURL              string   `json:"jwks_uri"`
 	UserInfoURL          string   `json:"userinfo_endpoint"`
+	EndSessionURL        string   `json:"end_session_endpoint"`
 	CodeChallengeAlgs    []string `json:"code_challenge_methods_supported"`
 	SupportedSigningAlgs []string `json:"id_token_signing_alg_values_supported"`
 }
@@ -41,6 +42,7 @@ type DiscoveryProvider interface {
 	Endpoints() Endpoints
 	PKCE() PKCE
 	SupportedSigningAlgs() []string
+	EndSessionURL() string
 }
 
 // NewProvider allows a user to perform an OIDC discovery and returns the DiscoveryProvider.
@@ -69,6 +71,7 @@ func NewProvider(ctx context.Context, issuerURL string, skipIssuerVerification b
 		tokenURL:             p.TokenURL,
 		jwksURL:              p.JWKsURL,
 		userInfoURL:          p.UserInfoURL,
+		endSessionURL:        p.EndSessionURL,
 		codeChallengeAlgs:    p.CodeChallengeAlgs,
 		supportedSigningAlgs: p.SupportedSigningAlgs,
 	}, nil
@@ -80,6 +83,7 @@ type discoveryProvider struct {
 	tokenURL             string
 	jwksURL              string
 	userInfoURL          string
+	endSessionURL        string
 	codeChallengeAlgs    []string
 	supportedSigningAlgs []string
 }
@@ -104,4 +108,9 @@ func (p *discoveryProvider) PKCE() PKCE {
 // SupportedSigningAlgs returns the discovered provider signing algorithms.
 func (p *discoveryProvider) SupportedSigningAlgs() []string {
 	return p.supportedSigningAlgs
+}
+
+// EndSessionURL returns the discovered end_session_endpoint for RP-initiated logout.
+func (p *discoveryProvider) EndSessionURL() string {
+	return p.endSessionURL
 }

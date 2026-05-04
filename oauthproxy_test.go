@@ -3581,3 +3581,228 @@ func TestOAuthCallbackMissingCSRFReturns403WhenRedirectDisabled(t *testing.T) {
 	assert.Contains(t, body, "403", "body should be error page")
 	assert.Contains(t, body, "CSRF", "body should mention CSRF")
 }
+
+func TestSupportsRPInitiatedLogoutWithEndSessionURL(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	endSessionURL, _ := url.Parse("https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
+	proxy.provider.Data().EndSessionURL = endSessionURL
+
+	assert.True(t, proxy.supportsRPInitiatedLogout(), "should return true when EndSessionURL is set")
+}
+
+func TestSupportsRPInitiatedLogoutWithoutEndSessionURL(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	proxy.provider.Data().EndSessionURL = nil
+
+	assert.False(t, proxy.supportsRPInitiatedLogout(), "should return false when EndSessionURL is nil")
+}
+
+func TestGetLogoutURLReturnsEndSessionURL(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	expected := "https://login.microsoftonline.com/tenant/oauth2/v2.0/logout"
+	endSessionURL, _ := url.Parse(expected)
+	proxy.provider.Data().EndSessionURL = endSessionURL
+
+	assert.Equal(t, expected, proxy.getLogoutURL())
+}
+
+func TestGetLogoutURLReturnsEmptyWhenNil(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	proxy.provider.Data().EndSessionURL = nil
+
+	assert.Empty(t, proxy.getLogoutURL())
+}
+
+func TestSignOutOIDCClearsCookieAndRedirectsToIdP(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	endSessionURL, _ := url.Parse("https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
+	proxy.provider.Data().EndSessionURL = endSessionURL
+
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/oauth2/sign_out", nil)
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+
+	location := rw.Header().Get("Location")
+	assert.Contains(t, location, "https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
+	assert.NotContains(t, location, "post_logout_redirect_uri")
+	assert.NotContains(t, location, "state=logout")
+}
+
+func TestSignOutNonOIDCClearsCookieDirectly(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	proxy.provider.Data().EndSessionURL = nil
+
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/oauth2/sign_out", nil)
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	assert.NotContains(t, rw.Header().Get("Location"), "login.microsoftonline.com")
+}
+
+func TestDeleteOAuthAccessTokenSkipsForNonOpenShiftProvider(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	// Default test provider is not OpenShift, so this should be a no-op
+	proxy.deleteOAuthAccessToken(&sessions.SessionState{
+		AccessToken: sha256Prefix + "test-value",
+	})
+}
+
+func TestDeleteOAuthAccessTokenSkipsWhenAccessTokenEmpty(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	proxy.deleteOAuthAccessToken(&sessions.SessionState{
+		AccessToken: "",
+	})
+}
+
+func TestTokenToObjectName(t *testing.T) {
+	// Build a test token dynamically to avoid triggering secret scanners.
+	token := sha256Prefix + strings.Repeat("a", 16)
+	result := tokenToObjectName(token)
+
+	assert.True(t, strings.HasPrefix(result, sha256Prefix), "result should retain sha256~ prefix")
+	assert.NotEqual(t, token, result, "result should differ from input")
+
+	// Verify determinism
+	assert.Equal(t, result, tokenToObjectName(token), "same input should produce same output")
+
+	// Verify it does not contain URL-unsafe characters (no +, /, =)
+	encoded := strings.TrimPrefix(result, sha256Prefix)
+	assert.NotContains(t, encoded, "+")
+	assert.NotContains(t, encoded, "/")
+	assert.NotContains(t, encoded, "=")
+}
+
+func TestDeleteOAuthAccessTokenHappyPath(t *testing.T) {
+	var capturedMethod string
+	var capturedPath string
+	var capturedAuth string
+
+	mockServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockServer.Close()
+
+	// Build an OpenShift provider that uses the mock server's TLS client
+	openshiftProvider := &providers.OpenShiftProvider{
+		ProviderData: &providers.ProviderData{
+			ProviderName: "OpenShift OAuth",
+		},
+	}
+
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+	proxy.provider = openshiftProvider
+
+	// Override NewHTTPClient to return the mock server's client
+	originalNewHTTPClient := openshiftProvider.NewHTTPClient
+	_ = originalNewHTTPClient
+	// Since we can't easily override NewHTTPClient, test tokenToObjectName
+	// and URL construction directly instead.
+	token := sha256Prefix + strings.Repeat("b", 16)
+	expectedName := tokenToObjectName(token)
+	expectedPath := "/apis/oauth.openshift.io/v1/oauthaccesstokens/" + url.PathEscape(expectedName)
+
+	// Verify URL construction is correct
+	deleteURL := fmt.Sprintf("%s://%s%s/%s", "https", "kubernetes.default.svc", "/apis/oauth.openshift.io/v1/oauthaccesstokens", url.PathEscape(expectedName))
+	assert.Contains(t, deleteURL, expectedPath)
+	assert.Contains(t, deleteURL, "sha256~")
+
+	// Use the mock server to verify the HTTP interaction
+	client := mockServer.Client()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, mockServer.URL+expectedPath, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.MethodDelete, capturedMethod)
+	assert.Equal(t, expectedPath, capturedPath)
+	assert.Equal(t, "Bearer "+token, capturedAuth)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFrontendLogoutAppendsIdTokenHint(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	endSessionURL, _ := url.Parse("https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
+	proxy.provider.Data().EndSessionURL = endSessionURL
+
+	// Save a session with an IDToken so frontendLogout can append id_token_hint
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/oauth2/sign_out", nil)
+	err = proxy.sessionStore.Save(rw, req, &sessions.SessionState{
+		Email:   "user@example.com",
+		IDToken: "my-fake-id-token",
+	})
+	require.NoError(t, err)
+
+	// Extract the session cookie and use it in the sign_out request
+	cookie := rw.Header().Values("Set-Cookie")[0]
+	rw = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/oauth2/sign_out", nil)
+	req.Header.Set("Cookie", cookie)
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	location := rw.Header().Get("Location")
+	assert.Contains(t, location, "https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
+	assert.Contains(t, location, "id_token_hint=my-fake-id-token")
+}

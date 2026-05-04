@@ -457,6 +457,22 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 	return httpClient, nil
 }
 
+// NewHTTPClient returns a configured HTTP client for making API calls
+// to the OpenShift cluster (e.g. deleting OAuthAccessToken resources).
+func (p *OpenShiftProvider) NewHTTPClient() (*http.Client, error) {
+	base, err := p.newOpenShiftClient()
+	if err != nil {
+		return nil, err
+	}
+
+	// Defensive copy to prevent external mutation of shared cached client state.
+	cloned := *base
+	if tr, ok := base.Transport.(*http.Transport); ok && tr != nil {
+		cloned.Transport = tr.Clone()
+	}
+	return &cloned, nil
+}
+
 // discoverOpenShiftOAuth discovers OAuth endpoints from the well-known endpoint
 func (p *OpenShiftProvider) discoverOpenShiftOAuth(client *http.Client) (*url.URL, *url.URL, error) {
 	wellKnownURL := getKubeAPIURLWithPath(openShiftOAuthDiscoveryPath)
