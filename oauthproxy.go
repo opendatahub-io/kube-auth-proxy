@@ -31,6 +31,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/encryption"
 	proxyhttp "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/http"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/tls/profile"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/util"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version"
 
@@ -290,11 +291,34 @@ func (p *OAuthProxy) Start() error {
 }
 
 func (p *OAuthProxy) setupServer(opts *options.Options) error {
+	// Initialize TLS profile manager for dynamic TLS configuration from OpenShift
+	var tlsProfileManager profile.Manager
+	if opts.Server.SecureBindAddress != "" && opts.Server.SecureBindAddress != "-" {
+		// Only initialize TLS profile manager when HTTPS is enabled
+		logger.Printf("Initializing TLS profile manager for OpenShift integration")
+
+		// Use kubeconfig from options, or empty string for in-cluster config
+		kubeconfig := ""
+		if opts.Kubeconfig != "" {
+			kubeconfig = opts.Kubeconfig
+		}
+
+		manager, err := profile.NewOpenShiftProfileClient(kubeconfig)
+		if err != nil {
+			logger.Errorf("Failed to initialize TLS profile manager, falling back to static TLS config: %v", err)
+			// Continue without TLS profile manager - this enables fallback to legacy behavior
+		} else {
+			tlsProfileManager = manager
+			logger.Printf("TLS profile manager initialized successfully")
+		}
+	}
+
 	serverOpts := proxyhttp.Opts{
 		Handler:           p,
 		BindAddress:       opts.Server.BindAddress,
 		SecureBindAddress: opts.Server.SecureBindAddress,
 		TLS:               opts.Server.TLS,
+		TLSProfileManager: tlsProfileManager,
 	}
 
 	// Option: AllowQuerySemicolons
@@ -307,11 +331,28 @@ func (p *OAuthProxy) setupServer(opts *options.Options) error {
 		return fmt.Errorf("could not build app server: %v", err)
 	}
 
+	// Initialize a separate TLS profile manager for metrics server if it uses HTTPS.
+	// A separate instance is required because ProfileManager.StartWatching only allows
+	// one active watcher per instance; reusing the app server's instance would cause
+	// the metrics server to fail with ErrWatcherAlreadyStarted.
+	var metricsTLSProfileManager profile.Manager
+	if opts.MetricsServer.SecureBindAddress != "" && opts.MetricsServer.SecureBindAddress != "-" {
+		kubeconfig := opts.Kubeconfig
+		metricsManager, err := profile.NewOpenShiftProfileClient(kubeconfig)
+		if err != nil {
+			logger.Errorf("Failed to initialize TLS profile manager for metrics server, falling back to static TLS config: %v", err)
+		} else {
+			metricsTLSProfileManager = metricsManager
+			logger.Printf("TLS profile manager initialized for metrics server")
+		}
+	}
+
 	metricsServer, err := proxyhttp.NewServer(proxyhttp.Opts{
 		Handler:           middleware.DefaultMetricsHandler,
 		BindAddress:       opts.MetricsServer.BindAddress,
 		SecureBindAddress: opts.MetricsServer.SecureBindAddress,
 		TLS:               opts.MetricsServer.TLS,
+		TLSProfileManager: metricsTLSProfileManager,
 	})
 	if err != nil {
 		return fmt.Errorf("could not build metrics server: %v", err)
