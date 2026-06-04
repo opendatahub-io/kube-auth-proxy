@@ -458,7 +458,7 @@ type LegacyServer struct {
 	TLSCertFile          string   `flag:"tls-cert-file" cfg:"tls_cert_file"`
 	TLSKeyFile           string   `flag:"tls-key-file" cfg:"tls_key_file"`
 	TLSMinVersion        string   `flag:"tls-min-version" cfg:"tls_min_version"`
-	TLSCipherSuites      []string `flag:"tls-cipher-suite" cfg:"tls_cipher_suites"`
+	TLSCipherSuites      []string `flag:"tls-cipher-suites" cfg:"tls_cipher_suites"`
 }
 
 func legacyServerFlagset() *pflag.FlagSet {
@@ -473,7 +473,7 @@ func legacyServerFlagset() *pflag.FlagSet {
 	flagSet.String("tls-cert-file", "", "path to certificate file")
 	flagSet.String("tls-key-file", "", "path to private key file")
 	flagSet.String("tls-min-version", "", "minimal TLS version for HTTPS clients (either \"TLS1.2\" or \"TLS1.3\")")
-	flagSet.StringSlice("tls-cipher-suite", []string{}, "restricts TLS cipher suites to those listed (e.g. TLS_RSA_WITH_RC4_128_SHA) (may be given multiple times)")
+	flagSet.StringSlice("tls-cipher-suites", []string{}, "restricts TLS cipher suites to those listed (e.g. TLS_RSA_WITH_RC4_128_SHA) (may be given multiple times)")
 
 	return flagSet
 }

@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -311,7 +312,7 @@ var _ = Describe("Server", func() {
 					TLS: &options.TLS{
 						Key:        &ipv4KeyDataSource,
 						Cert:       &ipv4CertDataSource,
-						MinVersion: "TLS1.3",
+						MinVersion: "VersionTLS13",
 					},
 				},
 				expectedErr:        nil,
@@ -589,7 +590,7 @@ var _ = Describe("Server", func() {
 					TLS: &options.TLS{
 						Key:        &ipv6KeyDataSource,
 						Cert:       &ipv6CertDataSource,
-						MinVersion: "TLS1.3",
+						MinVersion: "VersionTLS13",
 					},
 				},
 				expectedErr:        nil,
@@ -1277,6 +1278,52 @@ var _ = Describe("Server", func() {
 				}).Should(HaveOccurred())
 			})
 		})
+	})
+
+	Context("setTLSMinVersion", func() {
+		type setTLSMinVersionTableInput struct {
+			minVersion         string
+			expectedErr        error
+			expectedMinVersion uint16
+		}
+
+		DescribeTable("When setting the TLS minimum version", func(in *setTLSMinVersionTableInput) {
+			config := &tls.Config{}
+			err := setTLSMinVersion(config, in.minVersion)
+
+			if in.expectedErr != nil {
+				Expect(err).To(MatchError(in.expectedErr))
+				return
+			}
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(config.MinVersion).To(Equal(in.expectedMinVersion))
+		},
+			Entry("with VersionTLS10", &setTLSMinVersionTableInput{
+				minVersion:         "VersionTLS10",
+				expectedMinVersion: tls.VersionTLS10,
+			}),
+			Entry("with VersionTLS11", &setTLSMinVersionTableInput{
+				minVersion:         "VersionTLS11",
+				expectedMinVersion: tls.VersionTLS11,
+			}),
+			Entry("with VersionTLS12", &setTLSMinVersionTableInput{
+				minVersion:         "VersionTLS12",
+				expectedMinVersion: tls.VersionTLS12,
+			}),
+			Entry("with VersionTLS13", &setTLSMinVersionTableInput{
+				minVersion:         "VersionTLS13",
+				expectedMinVersion: tls.VersionTLS13,
+			}),
+			Entry("with an unknown version string", &setTLSMinVersionTableInput{
+				minVersion:  "TLS1.42",
+				expectedErr: errors.New("unknown TLS MinVersion config provided"),
+			}),
+			Entry("with an empty string", &setTLSMinVersionTableInput{
+				minVersion:  "",
+				expectedErr: errors.New("unknown TLS MinVersion config provided"),
+			}),
+		)
 	})
 
 	Context("getNetworkScheme", func() {

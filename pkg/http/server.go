@@ -16,6 +16,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options/util"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	configv1 "github.com/openshift/api/config/v1"
 )
 
 // Server represents an HTTP or HTTPS server.
@@ -157,13 +158,8 @@ func (s *server) setupTLSListener(opts Opts) error {
 	}
 
 	if len(opts.TLS.MinVersion) > 0 {
-		switch opts.TLS.MinVersion {
-		case "TLS1.2":
-			config.MinVersion = tls.VersionTLS12
-		case "TLS1.3":
-			config.MinVersion = tls.VersionTLS13
-		default:
-			return errors.New("unknown TLS MinVersion config provided")
+		if err := setTLSMinVersion(config, opts.TLS.MinVersion); err != nil {
+			return err
 		}
 	}
 
@@ -305,4 +301,20 @@ func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
 		logger.Printf("Error setting Keep-Alive period: %v", err)
 	}
 	return tc, nil
+}
+
+func setTLSMinVersion(config *tls.Config, minVersion string) error {
+	switch configv1.TLSProtocolVersion(minVersion) {
+	case configv1.VersionTLS10:
+		config.MinVersion = tls.VersionTLS10
+	case configv1.VersionTLS11:
+		config.MinVersion = tls.VersionTLS11
+	case configv1.VersionTLS12:
+		config.MinVersion = tls.VersionTLS12
+	case configv1.VersionTLS13:
+		config.MinVersion = tls.VersionTLS13
+	default:
+		return errors.New("unknown TLS MinVersion config provided")
+	}
+	return nil
 }
