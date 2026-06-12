@@ -1,6 +1,6 @@
 module github.com/opendatahub-io/kube-auth-proxy/v1
 
-go 1.25.3
+go 1.26.0
 
 require (
 	github.com/Bose/minisentinel v0.0.0-20200130220412-917c5a9223bb
