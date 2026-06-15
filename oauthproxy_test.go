@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -1111,6 +1112,22 @@ func TestAuthOnlyEndpointUnauthorizedOnNoCookieSetError(t *testing.T) {
 	assert.Equal(t, "Unauthorized\n", string(bodyBytes))
 }
 
+func TestAuthOnlyEndpointUnauthorizedMLflowRequest(t *testing.T) {
+	test, err := NewAuthOnlyEndpointTest("")
+	require.NoError(t, err)
+
+	test.req.Header.Set("User-Agent", "mlflow-python-client/3.11.1")
+	test.proxy.ServeHTTP(test.rw, test.req)
+
+	assert.Equal(t, http.StatusUnauthorized, test.rw.Code)
+	assert.Equal(t, applicationJSON, test.rw.Header().Get("Content-Type"))
+
+	var response map[string]string
+	require.NoError(t, json.Unmarshal(test.rw.Body.Bytes(), &response))
+	assert.Equal(t, "UNAUTHENTICATED", response["error_code"])
+	assert.Contains(t, response["message"], "MLFLOW_TRACKING_AUTH=kubernetes-namespaced")
+}
+
 func TestAuthOnlyEndpointUnauthorizedOnExpiration(t *testing.T) {
 	test, err := NewAuthOnlyEndpointTest("", func(opts *options.Options) {
 		opts.Cookie.Expire = time.Duration(24) * time.Hour
@@ -1713,6 +1730,87 @@ func TestAjaxForbiddendRequest(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, code)
 	mime := rh.Get("Content-Type")
 	assert.NotEqual(t, applicationJSON, mime)
+}
+
+func testMLflowUnauthorizedRequest(t *testing.T, header http.Header) {
+	test, err := newAjaxRequestTest(false)
+	require.NoError(t, err)
+
+	code, rh, body, err := test.getEndpoint("/test", header)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, code)
+	assert.Equal(t, applicationJSON, rh.Get("Content-Type"))
+	assert.Empty(t, rh.Get("Location"))
+
+	var response map[string]string
+	require.NoError(t, json.Unmarshal(body, &response))
+	assert.Equal(t, "UNAUTHENTICATED", response["error_code"])
+	assert.Contains(t, response["message"], "`oc login`")
+	assert.Contains(t, response["message"], "`oc project`")
+	assert.Contains(t, response["message"], "MLflow Python client 3.11+")
+	assert.Contains(t, response["message"], "MLFLOW_TRACKING_AUTH=kubernetes-namespaced")
+}
+
+func TestMLflowUnauthorizedRequestUserAgent(t *testing.T) {
+	header := make(http.Header)
+	header.Set("User-Agent", "mlflow-python-client/3.11.1")
+
+	testMLflowUnauthorizedRequest(t, header)
+}
+
+func TestMLflowUserAgentBrowserRequestFallsBackToSignInPage(t *testing.T) {
+	test, err := newAjaxRequestTest(false)
+	require.NoError(t, err)
+
+	header := make(http.Header)
+	header.Set("Accept", "text/html")
+	header.Set("User-Agent", "mlflow-python-client/3.11.1")
+
+	code, rh, body, err := test.getEndpoint("/test", header)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, code)
+	assert.NotEqual(t, applicationJSON, rh.Get("Content-Type"))
+	assert.NotContains(t, string(body), "MLFLOW_TRACKING_AUTH=kubernetes-namespaced")
+}
+
+func TestMLflowAccessDeniedFallsBackToDefaultResponse(t *testing.T) {
+	opts := baseTestOptions()
+	err := validation.Validate(opts)
+	require.NoError(t, err)
+
+	proxy, err := NewOAuthProxy(opts, func(email string) bool {
+		return email == "allowed@example.com"
+	}, nil)
+	require.NoError(t, err)
+
+	rw := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	err = proxy.sessionStore.Save(rw, req, &sessions.SessionState{
+		Email: "denied@example.com",
+	})
+	require.NoError(t, err)
+
+	req = httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Cookie", rw.Header().Values("Set-Cookie")[0])
+	req.Header.Set("User-Agent", "mlflow-python-client/3.11.1")
+
+	rw = httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusForbidden, rw.Code)
+	assert.NotEqual(t, applicationJSON, rw.Header().Get("Content-Type"))
+	assert.NotContains(t, rw.Body.String(), "MLFLOW_TRACKING_AUTH=kubernetes-namespaced")
+}
+
+func TestNonMLflowRequestStillUsesSignInPage(t *testing.T) {
+	test, err := newAjaxRequestTest(false)
+	require.NoError(t, err)
+
+	code, rh, body, err := test.getEndpoint("/test", nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, code)
+	assert.NotEqual(t, applicationJSON, rh.Get("Content-Type"))
+	assert.NotContains(t, string(body), "MLFLOW_TRACKING_AUTH=kubernetes-namespaced")
 }
 
 func TestClearSplitCookie(t *testing.T) {

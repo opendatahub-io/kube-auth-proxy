@@ -26,6 +26,7 @@ import (
 	sessionsapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/pagewriter"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/app/redirect"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authdeny"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/basic"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/k8s"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/cookies"
@@ -109,6 +110,7 @@ type OAuthProxy struct {
 	skipJwtBearerTokens  bool
 	forceJSONErrors      bool
 	allowQuerySemicolons bool
+	authDeniedHandlers   []authdeny.Handler
 	realClientIPParser   ipapi.RealClientIPParser
 	trustedIPs           *ip.NetSet
 
@@ -123,6 +125,21 @@ type OAuthProxy struct {
 	appDirector       redirect.AppDirector
 
 	encodeState bool
+}
+
+func (p *OAuthProxy) handleAuthDenied(rw http.ResponseWriter, req *http.Request, statusCode int) bool {
+	// Browser requests should continue through the existing HTML login/error flow.
+	if strings.Contains(req.Header.Get("Accept"), "text/html") {
+		return false
+	}
+
+	for _, handler := range p.authDeniedHandlers {
+		if handler.Handle(rw, req, statusCode) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
@@ -246,6 +263,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenV
 		redirectOnCSRFError:  !opts.DisableRedirectOnCSRFError,
 		forceJSONErrors:      opts.ForceJSONErrors,
 		allowQuerySemicolons: opts.AllowQuerySemicolons,
+		authDeniedHandlers:   []authdeny.Handler{authdeny.NewMLflowHandler()},
 		trustedIPs:           trustedIPs,
 
 		basicAuthValidator: basicAuthValidator,
@@ -1190,6 +1208,9 @@ func (p *OAuthProxy) enrichSessionState(ctx context.Context, s *sessionsapi.Sess
 func (p *OAuthProxy) AuthOnly(rw http.ResponseWriter, req *http.Request) {
 	session, err := p.getAuthenticatedSession(rw, req)
 	if err != nil {
+		if errors.Is(err, ErrNeedsLogin) && p.handleAuthDenied(rw, req, http.StatusUnauthorized) {
+			return
+		}
 		http.Error(rw, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
@@ -1197,6 +1218,9 @@ func (p *OAuthProxy) AuthOnly(rw http.ResponseWriter, req *http.Request) {
 	// Unauthorized cases need to return 403 to prevent infinite redirects with
 	// subrequest architectures
 	if !authOnlyAuthorize(req, session) {
+		if p.handleAuthDenied(rw, req, http.StatusForbidden) {
+			return
+		}
 		http.Error(rw, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
 	}
@@ -1219,6 +1243,10 @@ func (p *OAuthProxy) Proxy(rw http.ResponseWriter, req *http.Request) {
 		p.headersChain.Then(p.upstreamProxy).ServeHTTP(rw, req)
 	case ErrNeedsLogin:
 		// we need to send the user to a login screen
+		if p.handleAuthDenied(rw, req, http.StatusUnauthorized) {
+			return
+		}
+
 		if p.forceJSONErrors || isAjax(req) || p.isAPIPath(req) {
 			logger.Printf("No valid authentication in request. Access Denied.")
 			// no point redirecting an AJAX request
@@ -1237,9 +1265,12 @@ func (p *OAuthProxy) Proxy(rw http.ResponseWriter, req *http.Request) {
 		}
 
 	case ErrAccessDenied:
-		if p.forceJSONErrors {
+		switch {
+		case p.handleAuthDenied(rw, req, http.StatusForbidden):
+			return
+		case p.forceJSONErrors:
 			p.errorJSON(rw, http.StatusForbidden)
-		} else {
+		default:
 			p.ErrorPage(rw, req, http.StatusForbidden, "The session failed authorization checks")
 		}
 
