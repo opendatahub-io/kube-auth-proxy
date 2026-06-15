@@ -212,7 +212,7 @@ var _ = Describe("CSRF Cookie with non-fixed name Tests", func() {
 				privateCSRF3 := publicCSRF3.(*csrf)
 				privateCSRF3.time.Set(testNow.Add(time.Minute * 2))
 
-				cookies := []string{}
+				cookies := make([]string, 0, 3)
 				for _, csrf := range []*csrf{privateCSRF1, privateCSRF2, privateCSRF3} {
 					encoded, err := csrf.encodeCookie()
 					Expect(err).ToNot(HaveOccurred())

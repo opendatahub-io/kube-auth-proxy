@@ -96,7 +96,7 @@ func (m *MockOpenShiftOAuth) authorize(w http.ResponseWriter, r *http.Request) {
 		q.Set("state", state)
 	}
 	dest.RawQuery = q.Encode()
-	http.Redirect(w, r, dest.String(), http.StatusFound)
+	http.Redirect(w, r, dest.String(), http.StatusFound) //nolint:gosec // G710 - test mock OAuth server only
 }
 
 func (m *MockOpenShiftOAuth) token(w http.ResponseWriter, r *http.Request) {

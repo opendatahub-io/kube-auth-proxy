@@ -18,6 +18,7 @@ const (
 	// Part of hmacauth
 	SignatureHeader = "GAP-Signature"
 
+	gapAuth     = "Gap-Auth"
 	httpScheme  = "http"
 	httpsScheme = "https"
 	unixScheme  = "unix"
@@ -36,7 +37,7 @@ var SignatureHeaders = []string{
 	"X-Forwarded-Preferred-User",
 	"X-Forwarded-Access-Token",
 	"Cookie",
-	"Gap-Auth",
+	gapAuth,
 }
 
 // newHTTPUpstreamProxy creates a new httpUpstreamProxy that can serve requests
@@ -122,7 +123,7 @@ func (t *unixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 // The proxy should render an error page if there are failures connecting to the
 // upstream server.
 func newReverseProxy(target *url.URL, upstream options.Upstream, errorHandler ProxyErrorHandler) http.Handler {
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := &httputil.ReverseProxy{}
 
 	// Inherit default transport options from Go's stdlib
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -153,11 +154,20 @@ func newReverseProxy(target *url.URL, upstream options.Upstream, errorHandler Pr
 		transport.TLSClientConfig.InsecureSkipVerify = true
 	}
 
-	// Ensure we always pass the original request path
-	setProxyDirector(proxy)
-
-	if upstream.PassHostHeader != nil && !*upstream.PassHostHeader {
-		setProxyUpstreamHostHeader(proxy, target)
+	overrideHost := upstream.PassHostHeader != nil && !*upstream.PassHostHeader
+	proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		r.SetURL(target)
+		r.Out.Header["X-Forwarded-For"] = r.In.Header["X-Forwarded-For"]
+		r.SetXForwarded()
+		// Use RequestURI so that we aren't unescaping encoded slashes in the request path
+		r.Out.URL.Opaque = r.In.RequestURI
+		r.Out.URL.RawQuery = ""
+		r.Out.URL.ForceQuery = false
+		if overrideHost {
+			r.Out.Host = target.Host
+		} else {
+			r.Out.Host = r.In.Host
+		}
 	}
 
 	// Set the error handler so that upstream connection failures render the
@@ -170,29 +180,6 @@ func newReverseProxy(target *url.URL, upstream options.Upstream, errorHandler Pr
 	proxy.Transport = transport
 
 	return proxy
-}
-
-// setProxyUpstreamHostHeader sets the proxy.Director so that upstream requests
-// receive a host header matching the target URL.
-func setProxyUpstreamHostHeader(proxy *httputil.ReverseProxy, target *url.URL) {
-	director := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		director(req)
-		req.Host = target.Host
-	}
-}
-
-// setProxyDirector sets the proxy.Director so that request URIs are escaped
-// when proxying to usptream servers.
-func setProxyDirector(proxy *httputil.ReverseProxy) {
-	director := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		director(req)
-		// use RequestURI so that we aren't unescaping encoded slashes in the request path
-		req.URL.Opaque = req.RequestURI
-		req.URL.RawQuery = ""
-		req.URL.ForceQuery = false
-	}
 }
 
 // newWebSocketReverseProxy creates a new reverse proxy for proxying websocket connections.

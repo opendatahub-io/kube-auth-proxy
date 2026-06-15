@@ -59,10 +59,12 @@ func NewRequestMetrics(registerer prometheus.Registerer) alice.Constructor {
 // registerRequestsCounter registers the 'oauth2_proxy_requests_total' metric
 // This keeps a tally of all received requests bucket by their HTTP response
 // status code
+const metricRequestsTotal = "oauth2_proxy_requests_total"
+
 func registerRequestsCounter(registerer prometheus.Registerer) *prometheus.CounterVec {
 	counter := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "oauth2_proxy_requests_total",
+			Name: metricRequestsTotal,
 			Help: "Total number of requests by HTTP status code.",
 		},
 		[]string{"code"},

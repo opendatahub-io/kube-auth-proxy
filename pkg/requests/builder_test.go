@@ -296,7 +296,7 @@ func assertSuccessfulRequest(builder func() Builder, expectedRequest testHTTPReq
 			for key, value := range response.Get("Header").MustMap() {
 				vs, ok := value.([]interface{})
 				Expect(ok).To(BeTrue())
-				svs := []string{}
+				svs := make([]string, 0, len(vs))
 				for _, v := range vs {
 					sv, ok := v.(string)
 					Expect(ok).To(BeTrue())

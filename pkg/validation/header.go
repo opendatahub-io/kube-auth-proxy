@@ -7,7 +7,7 @@ import (
 )
 
 func validateHeaders(headers []options.Header) []string {
-	msgs := []string{}
+	msgs := make([]string, 0, len(headers))
 	names := make(map[string]struct{})
 
 	for _, header := range headers {

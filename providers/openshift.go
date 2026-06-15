@@ -537,7 +537,7 @@ func (p *OpenShiftProvider) discoverOpenShiftOAuth(client *http.Client) (*url.UR
 // for auto-detection when running inside a cluster, falling back to the default
 // Kubernetes service DNS name.
 func getKubeAPIURLWithPath(path string) string {
-	scheme := "https"
+	scheme := schemeHTTPS
 	host := kubernetesDefaultService
 
 	if h := os.Getenv("KUBERNETES_SERVICE_HOST"); len(h) > 0 {

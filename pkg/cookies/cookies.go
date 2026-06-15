@@ -25,7 +25,7 @@ func MakeCookieFromOptions(req *http.Request, name string, value string, opts *o
 		domain = opts.Domains[len(opts.Domains)-1]
 	}
 
-	c := &http.Cookie{
+	c := &http.Cookie{ //nolint:gosec // G124 - HttpOnly, Secure, SameSite are all set from opts below
 		Name:     name,
 		Value:    value,
 		Path:     opts.Path,

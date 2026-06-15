@@ -18,6 +18,11 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 )
 
+const (
+	tlsVersion12 = "TLS1.2"
+	tlsVersion13 = "TLS1.3"
+)
+
 // Server represents an HTTP or HTTPS server.
 type Server interface {
 	// Start blocks and runs the server.
@@ -158,9 +163,9 @@ func (s *server) setupTLSListener(opts Opts) error {
 
 	if len(opts.TLS.MinVersion) > 0 {
 		switch opts.TLS.MinVersion {
-		case "TLS1.2":
+		case tlsVersion12:
 			config.MinVersion = tls.VersionTLS12
-		case "TLS1.3":
+		case tlsVersion13:
 			config.MinVersion = tls.VersionTLS13
 		default:
 			return errors.New("unknown TLS MinVersion config provided")
