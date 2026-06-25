@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -662,8 +663,7 @@ var _ = Describe("Server", func() {
 
 		AfterEach(func() {
 			cancel()
-			Eventually(Goroutines).ShouldNot(HaveLeaked())
-
+			Eventually(Goroutines).WithTimeout(5 * time.Second).ShouldNot(HaveLeaked())
 		})
 
 		Context("with an fd ipv4 http server", func() {

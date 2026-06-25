@@ -137,7 +137,7 @@ func (s *server) setupTLSListener(opts Opts) error {
 	config := &tls.Config{
 		MinVersion: tls.VersionTLS12, // default, override below
 		MaxVersion: tls.VersionTLS13,
-		NextProtos: []string{"http/1.1"},
+		NextProtos: []string{"h2", "http/1.1"},
 	}
 	if opts.TLS == nil {
 		return errors.New("no TLS config provided")
