@@ -41,10 +41,12 @@ func newStripHeaders(headers []options.Header) alice.Constructor {
 	}
 }
 
+const headerSetCookie = "Set-Cookie"
+
 func flattenHeaders(headers http.Header) {
 	for name, values := range headers {
 		// Set-Cookie should not be flattened, ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
-		if len(values) > 1 && name != "Set-Cookie" {
+		if len(values) > 1 && name != headerSetCookie {
 			headers.Set(name, strings.Join(values, ","))
 		}
 	}

@@ -147,7 +147,7 @@ func registerTrailingSlashHandler(serveMux *mux.Router) {
 		slashReq.URL.Path += "/"
 		return serveMux.Match(slashReq, m)
 	}).Handler(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		http.Redirect(rw, req, req.URL.String()+"/", http.StatusMovedPermanently)
+		http.Redirect(rw, req, req.URL.String()+"/", http.StatusMovedPermanently) //nolint:gosec // G710 - internal trailing-slash redirect, not user-controlled
 	}))
 }
 

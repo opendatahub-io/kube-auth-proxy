@@ -11,7 +11,7 @@ import (
 )
 
 func validateAllowlists(o *options.Options) []string {
-	msgs := []string{}
+	msgs := make([]string, 0, 3) //nolint:prealloc // exact size unknown, 3 is a reasonable estimate
 
 	msgs = append(msgs, validateAuthRoutes(o)...)
 	msgs = append(msgs, validateAuthRegexes(o)...)

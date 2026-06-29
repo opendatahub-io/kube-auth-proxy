@@ -15,6 +15,8 @@ import (
 const (
 	CodeChallengeMethodPlain = "plain"
 	CodeChallengeMethodS256  = "S256"
+
+	schemeHTTPS = "https"
 )
 
 // Provider represents an upstream identity provider implementation
@@ -88,7 +90,7 @@ func newProviderDataFromConfig(providerConfig options.Provider) (*ProviderData, 
 			p.SupportedCodeChallengeMethods = pkce.CodeChallengeAlgs
 
 			if esURL := pv.Provider().EndSessionURL(); esURL != "" {
-				if parsed, err := url.Parse(esURL); err == nil && parsed.Scheme == "https" {
+				if parsed, err := url.Parse(esURL); err == nil && parsed.Scheme == schemeHTTPS {
 					p.EndSessionURL = parsed
 					logger.Printf("Discovered end_session_endpoint: %s", esURL)
 				}
@@ -133,7 +135,7 @@ func newProviderDataFromConfig(providerConfig options.Provider) (*ProviderData, 
 	}
 
 	if providerConfig.OIDCConfig.UserIDClaim == "" {
-		providerConfig.OIDCConfig.UserIDClaim = "email"
+		providerConfig.OIDCConfig.UserIDClaim = options.OIDCEmailClaim
 	}
 
 	// TODO (@NickMeves) - Remove This

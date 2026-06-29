@@ -357,12 +357,12 @@ var _ = Describe("HTTP Upstream Suite", func() {
 		httpUpstream, ok := handler.(*httpUpstreamProxy)
 		Expect(ok).To(BeTrue())
 
-		// Override the handler to just run the director and not actually send the request
+		// Override the handler to just run the rewrite and not actually send the request
 		requestInterceptor := func(h http.Handler) http.Handler {
 			return http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
 				proxy, ok := h.(*httputil.ReverseProxy)
 				Expect(ok).To(BeTrue())
-				proxy.Director(req)
+				proxy.Rewrite(&httputil.ProxyRequest{In: req, Out: req})
 			})
 		}
 		httpUpstream.handler = requestInterceptor(httpUpstream.handler)

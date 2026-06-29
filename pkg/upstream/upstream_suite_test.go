@@ -24,7 +24,7 @@ var (
 	serverAddr     string
 	unixServer     *httptest.Server
 	unixServerAddr string
-	invalidServer  = "http://::1"
+	invalidServer  = "http://[::1]"
 )
 
 func TestUpstreamSuite(t *testing.T) {
@@ -70,7 +70,6 @@ const (
 	applicationJSON = "application/json"
 	textPlainUTF8   = "text/plain; charset=utf-8"
 	textHTMLUTF8    = "text/html; charset=utf-8"
-	gapAuth         = "Gap-Auth"
 	gapSignature    = "Gap-Signature"
 )
 
@@ -185,7 +184,10 @@ func testSanitizeResponseHeader(h http.Header) {
 	h.Del("Last-Modified")
 }
 
-// Strip the accept header that is added by the HTTP Transport
+// Strip headers added by the HTTP Transport and reverse proxy that aren't relevant to tests
 func testSanitizeRequestHeader(h http.Header) {
 	h.Del(acceptEncoding)
+	h.Del("X-Forwarded-For")
+	h.Del("X-Forwarded-Host")
+	h.Del("X-Forwarded-Proto")
 }

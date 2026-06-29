@@ -8,7 +8,7 @@
 
 ## Changes since v7.11.0
 
-- Upgraded Go toolchain from 1.24 to 1.25.3
+- Upgraded Go toolchain from 1.25.3 to 1.26
 
 # V7.11.0
 
