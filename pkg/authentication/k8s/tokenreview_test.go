@@ -167,7 +167,7 @@ func TestTokenReviewValidator_ValidateToken_APIError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, session)
-	assert.Contains(t, err.Error(), "connection refused")
+	assert.Contains(t, err.Error(), "TokenReview API call failed")
 }
 
 func TestTokenReviewValidator_ValidateToken_AudienceValidation(t *testing.T) {
@@ -269,4 +269,81 @@ func TestTokenReviewValidator_ValidateToken_SessionFields(t *testing.T) {
 	assert.False(t, session.CreatedAt.IsZero())
 	assert.True(t, session.ExpiresOn.After(time.Now()))
 	assert.True(t, session.ExpiresOn.Before(time.Now().Add(25*time.Hour)))
+}
+
+func TestTokenReviewValidator_ValidateToken_ErrorSanitization(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiError    error
+		statusError string
+		expected    string
+	}{
+		{
+			name:     "API error with JWT-like fragment is redacted",
+			apiError: errors.New("failed to validate token eyJhbGciOiJSUzI1Ni.eyJpc3MiOiJrdWJlcm5ldGVz: connection timeout"),
+			expected: "TokenReview API call failed: failed to validate token [REDACTED]: connection timeout",
+		},
+		{
+			name:        "status error with token fragment is redacted",
+			statusError: "token eyJhbGciOiJSUzI1Ni.eyJpc3MiOiJrdWJlcm5ldGVz is expired",
+			expected:    "token not authenticated by TokenReview API: token [REDACTED] is expired",
+		},
+		{
+			name:     "API error with OpenShift sha256 token is redacted",
+			apiError: errors.New("invalid token: sha256~abcdefghijklmnopqrstuvwxyz123456 not found"),
+			expected: "TokenReview API call failed: invalid token: [REDACTED] not found",
+		},
+		{
+			name:     "simple error messages pass through unchanged",
+			apiError: errors.New("connection refused"),
+			expected: "TokenReview API call failed: connection refused",
+		},
+		{
+			name:        "simple status error passes through unchanged",
+			statusError: "token has expired",
+			expected:    "token not authenticated by TokenReview API: token has expired",
+		},
+		{
+			name:     "short dotted strings are not redacted",
+			apiError: errors.New("dial tcp api.cluster.local:6443: connection refused"),
+			expected: "TokenReview API call failed: dial tcp api.cluster.local:6443: connection refused",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mockFunc func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error)
+
+			if tt.apiError != nil {
+				mockFunc = func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+					return nil, tt.apiError
+				}
+			} else {
+				mockFunc = func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+					return &authenticationv1.TokenReview{
+						Status: authenticationv1.TokenReviewStatus{
+							Authenticated: false,
+							Error:         tt.statusError,
+						},
+					}, nil
+				}
+			}
+
+			client := &mockKubernetesClient{
+				Interface: fake.NewSimpleClientset(),
+				authClient: &mockTokenReviewClient{
+					tokenReviewFunc: mockFunc,
+				},
+			}
+
+			validator := &TokenReviewValidator{
+				client:    client,
+				audiences: []string{"test-audience"},
+			}
+
+			_, err := validator.ValidateToken(context.Background(), "test-token")
+			assert.Error(t, err)
+			assert.Equal(t, tt.expected, err.Error())
+		})
+	}
 }

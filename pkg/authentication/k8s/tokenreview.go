@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -85,12 +86,12 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 
 	result, err := v.client.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("TokenReview API call failed: %w", sanitizeTokenReviewError(err))
 	}
 
 	if !result.Status.Authenticated {
 		if result.Status.Error != "" {
-			return nil, fmt.Errorf("token not authenticated by TokenReview API: %s", result.Status.Error)
+			return nil, fmt.Errorf("token not authenticated by TokenReview API: %s", sanitizeStatusError(result.Status.Error))
 		}
 		return nil, errors.New("token not authenticated by TokenReview API")
 	}
@@ -111,4 +112,27 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 	session.SetExpiresOn(session.Clock.Now().Add(30 * time.Second))
 
 	return session, nil
+}
+
+// Patterns for redacting token fragments from error messages.
+const (
+	jwtTokenPattern   = `eyJ[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*` //nosec G101 -- regex for redaction, not a credential
+	oauthTokenPattern = `sha256~[a-zA-Z0-9_-]+` //nosec G101 -- regex for redaction, not a credential
+)
+
+// tokenPatterns is a compiled regex that matches JWT or OpenShift OAuth token fragments.
+var tokenPatterns = regexp.MustCompile(jwtTokenPattern + `|` + oauthTokenPattern)
+
+// sanitizeTokenReviewError removes potential token fragments from Kubernetes API errors.
+// The client-go library may include request/response details that contain token material.
+func sanitizeTokenReviewError(err error) error {
+	cleaned := tokenPatterns.ReplaceAllString(err.Error(), "[REDACTED]")
+	return errors.New(cleaned)
+}
+
+// sanitizeStatusError removes potential token fragments from the TokenReview Status.Error field.
+// While the API server typically returns messages like "token expired", some implementations
+// may echo back token fragments.
+func sanitizeStatusError(statusErr string) string {
+	return tokenPatterns.ReplaceAllString(statusErr, "[REDACTED]")
 }
