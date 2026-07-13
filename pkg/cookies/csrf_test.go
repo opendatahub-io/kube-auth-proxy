@@ -253,5 +253,62 @@ var _ = Describe("CSRF Cookie Tests", func() {
 				Expect(privateCSRF.cookieName()).To(ContainSubstring(cookieName))
 			})
 		})
+
+		Context("ClearAllCSRFCookies", func() {
+			It("clears a single CSRF cookie", func() {
+				csrfCookieName := fmt.Sprintf("%s_csrf", cookieName)
+				req.AddCookie(&http.Cookie{
+					Name:  csrfCookieName,
+					Value: "some-value",
+				})
+
+				rw := httptest.NewRecorder()
+				ClearAllCSRFCookies(cookieOpts, rw, req)
+
+				Expect(rw.Header().Get("Set-Cookie")).To(ContainSubstring(
+					fmt.Sprintf("%s=; Path=%s; Domain=%s; Max-Age=0; HttpOnly; Secure",
+						csrfCookieName,
+						cookiePath,
+						cookieDomain,
+					),
+				))
+			})
+
+			It("clears multiple per-request CSRF cookies", func() {
+				csrf1 := fmt.Sprintf("%s_abc12345_csrf", cookieName)
+				csrf2 := fmt.Sprintf("%s_xyz98765_csrf", cookieName)
+				req.AddCookie(&http.Cookie{Name: csrf1, Value: "val1"})
+				req.AddCookie(&http.Cookie{Name: csrf2, Value: "val2"})
+
+				rw := httptest.NewRecorder()
+				ClearAllCSRFCookies(cookieOpts, rw, req)
+
+				setCookies := rw.Header().Values("Set-Cookie")
+				Expect(setCookies).To(HaveLen(2))
+				Expect(setCookies[0]).To(ContainSubstring(csrf1 + "="))
+				Expect(setCookies[1]).To(ContainSubstring(csrf2 + "="))
+			})
+
+			It("does not clear non-CSRF cookies", func() {
+				// Session cookie should not be cleared
+				req.AddCookie(&http.Cookie{Name: cookieName, Value: "session-val"})
+				// Split session cookie should not be cleared
+				req.AddCookie(&http.Cookie{Name: cookieName + "_0", Value: "split-val"})
+				// Unrelated cookie should not be cleared
+				req.AddCookie(&http.Cookie{Name: "unrelated_csrf", Value: "other-val"})
+
+				rw := httptest.NewRecorder()
+				ClearAllCSRFCookies(cookieOpts, rw, req)
+
+				Expect(rw.Header().Values("Set-Cookie")).To(BeEmpty())
+			})
+
+			It("does nothing when no cookies are present", func() {
+				rw := httptest.NewRecorder()
+				ClearAllCSRFCookies(cookieOpts, rw, req)
+
+				Expect(rw.Header().Values("Set-Cookie")).To(BeEmpty())
+			})
+		})
 	})
 })

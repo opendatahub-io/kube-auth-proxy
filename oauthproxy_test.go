@@ -3770,6 +3770,44 @@ func TestSignOutNonOIDCClearsCookieDirectly(t *testing.T) {
 	assert.NotContains(t, rw.Header().Get("Location"), "login.microsoftonline.com")
 }
 
+func TestSignOutClearsCSRFCookies(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+	proxy.provider.Data().EndSessionURL = nil
+
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/oauth2/sign_out", nil)
+
+	// Add CSRF cookies that would be left over from a previous session
+	csrfCookieName := opts.Cookie.Name + "_csrf"
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "stale-csrf-value"})
+	// Add a per-request CSRF cookie
+	perRequestCSRF := opts.Cookie.Name + "_abc12345_csrf"
+	req.AddCookie(&http.Cookie{Name: perRequestCSRF, Value: "stale-per-request-value"})
+
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+
+	// Verify CSRF cookies were cleared (set to expired)
+	setCookies := rw.Header().Values("Set-Cookie")
+	foundCSRF := false
+	foundPerRequestCSRF := false
+	for _, sc := range setCookies {
+		if strings.Contains(sc, csrfCookieName+"=") && strings.Contains(sc, "Max-Age=0") {
+			foundCSRF = true
+		}
+		if strings.Contains(sc, perRequestCSRF+"=") && strings.Contains(sc, "Max-Age=0") {
+			foundPerRequestCSRF = true
+		}
+	}
+	assert.True(t, foundCSRF, "CSRF cookie should be cleared on sign-out")
+	assert.True(t, foundPerRequestCSRF, "Per-request CSRF cookie should be cleared on sign-out")
+}
+
 func TestDeleteOAuthAccessTokenSkipsForNonOpenShiftProvider(t *testing.T) {
 	opts := baseTestOptions()
 	require.NoError(t, validation.Validate(opts))

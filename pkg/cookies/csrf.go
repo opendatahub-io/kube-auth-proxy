@@ -163,6 +163,26 @@ func (c *csrf) SetCookie(rw http.ResponseWriter, req *http.Request) (*http.Cooki
 	return cookie, nil
 }
 
+// ClearAllCSRFCookies removes all CSRF cookies from the response by setting
+// them to expired. This should be called during sign-out to prevent stale CSRF
+// cookies from a previous user's session causing CSRF validation failures when
+// a different user logs in using the same browser.
+func ClearAllCSRFCookies(opts *options.Cookie, rw http.ResponseWriter, req *http.Request) {
+	prefix := fmt.Sprintf("%v_", opts.Name)
+
+	for _, cookie := range req.Cookies() {
+		if strings.HasPrefix(cookie.Name, prefix) && strings.HasSuffix(cookie.Name, "_csrf") {
+			http.SetCookie(rw, MakeCookieFromOptions(
+				req,
+				cookie.Name,
+				"",
+				opts,
+				time.Hour*-1,
+			))
+		}
+	}
+}
+
 // ClearExtraCsrfCookies limits the amount of existing CSRF cookies by deleting
 // an excess of cookies controlled through the option CSRFPerRequestLimit
 func ClearExtraCsrfCookies(opts *options.Cookie, rw http.ResponseWriter, req *http.Request) {

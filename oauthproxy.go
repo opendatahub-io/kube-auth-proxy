@@ -831,6 +831,12 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Clear any CSRF cookies left over from the current session. Stale CSRF
+	// cookies cause CSRF validation failures when a different user logs in
+	// using the same browser, leading to infinite redirect loops when
+	// --skip-provider-button is enabled (RHOAIENG-76271).
+	cookies.ClearAllCSRFCookies(p.CookieOptions, rw, req)
+
 	// Backend logout: server-side call to IdP, then redirect
 	providerData := p.provider.Data()
 	if providerData.BackendLogoutURL != "" {
