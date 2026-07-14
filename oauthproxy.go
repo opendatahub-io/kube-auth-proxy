@@ -831,9 +831,10 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Clear any CSRF cookies left over from the current session. Stale CSRF
-	// cookies cause CSRF validation failures when a different user logs in
-	// using the same browser, leading to infinite redirect loops when
+	// Clear CSRF cookies so they don't outlive the session. OAuthCallback
+	// clears the current flow's CSRF cookie on success, but stale cookies
+	// from a prior session can cause LoadCSRFCookie to fail before that
+	// code is ever reached, triggering an infinite redirect loop when
 	// --skip-provider-button is enabled (RHOAIENG-76271).
 	cookies.ClearAllCSRFCookies(p.CookieOptions, rw, req)
 
