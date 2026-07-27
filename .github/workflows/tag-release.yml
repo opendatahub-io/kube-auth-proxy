@@ -1,0 +1,117 @@
+name: Tag Release
+run-name: Tag release (auto-triggered on odh-release push)
+
+on:
+  push:
+    branches:
+      - odh-release
+    paths:
+      - '.tekton/kube-auth-proxy-push.yaml'
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out odh-release branch
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        ref: odh-release
+        fetch-depth: 0
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Extract version from push pipeline
+      id: version
+      run: |
+        VERSION=$(grep 'odh-kube-auth-proxy:' .tekton/kube-auth-proxy-push.yaml | sed 's/.*odh-kube-auth-proxy://')
+        VERSION=$(echo "$VERSION" | xargs)
+        echo "Detected version: ${VERSION}"
+
+        if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-ea\.[0-9]+)?$ ]]; then
+          echo "::error::Extracted version '${VERSION}' does not match expected format"
+          exit 1
+        fi
+
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Check if tag already exists
+      id: check-tag
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+          echo "Tag '${VERSION}' already exists, skipping"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Tag '${VERSION}' does not exist, proceeding"
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Wait for Konflux build to pass
+      if: steps.check-tag.outputs.exists == 'false'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+      run: |
+        SHA=$(git rev-parse HEAD)
+        echo "Waiting for Konflux check on commit ${SHA}..."
+
+        for i in $(seq 1 60); do
+          STATUS=$(gh api repos/${REPO}/commits/${SHA}/check-runs \
+            --jq '.check_runs[] | select(.name == "Red Hat Konflux / kube-auth-proxy-on-push") | .conclusion' 2>/dev/null || echo "")
+
+          if [ "$STATUS" = "success" ]; then
+            echo "Konflux build passed"
+            exit 0
+          elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
+            echo "::error::Konflux build failed with status: ${STATUS}"
+            exit 1
+          fi
+
+          echo "Attempt ${i}/60: Konflux build still running, waiting 30s..."
+          sleep 30
+        done
+
+        echo "::error::Timed out waiting for Konflux build (30 minutes)"
+        exit 1
+
+    - name: Detect previous tag
+      if: steps.check-tag.outputs.exists == 'false'
+      id: prev-tag
+      run: |
+        PREV_TAG=$(git describe --abbrev=0 --tags --match "v*" 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          echo "::warning::No previous tag found, release notes will include all history"
+          echo "prev_tag=" >> "$GITHUB_OUTPUT"
+        else
+          echo "Previous tag: ${PREV_TAG}"
+          echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Create and push tag
+      if: steps.check-tag.outputs.exists == 'false'
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+      run: |
+        git tag "${VERSION}"
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${VERSION}"
+
+    - name: Create GitHub release
+      if: steps.check-tag.outputs.exists == 'false'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ steps.version.outputs.version }}
+        PREV_TAG: ${{ steps.prev-tag.outputs.prev_tag }}
+      run: |
+
+        RELEASE_ARGS="--generate-notes"
+        if [ -n "$PREV_TAG" ]; then
+          RELEASE_ARGS="${RELEASE_ARGS} --notes-start-tag ${PREV_TAG}"
+        fi
+
+        gh release create "${VERSION}" ${RELEASE_ARGS}

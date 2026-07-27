@@ -11,6 +11,20 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const (
+	defaultHTTPAddress    = "127.0.0.1:4180"
+	defaultApprovalPrompt = "force"
+
+	headerAuthorization               = "Authorization"
+	headerXForwardedGroups            = "X-Forwarded-Groups"
+	headerXForwardedUser              = "X-Forwarded-User"
+	headerXForwardedEmail             = "X-Forwarded-Email"
+	headerXForwardedPreferredUsername = "X-Forwarded-Preferred-Username"
+
+	basicAuthPrefix     = "Basic "
+	paramApprovalPrompt = "approval_prompt"
+)
+
 type LegacyOptions struct {
 	// Legacy options related to upstream servers
 	LegacyUpstreams LegacyUpstreams `cfg:",squash"`
@@ -43,17 +57,17 @@ func NewLegacyOptions() *LegacyOptions {
 		},
 
 		LegacyServer: LegacyServer{
-			HTTPAddress:  "127.0.0.1:4180",
+			HTTPAddress:  defaultHTTPAddress,
 			HTTPSAddress: ":443",
 		},
 
 		LegacyProvider: LegacyProvider{
-			ProviderType:          "oidc",
-			ApprovalPrompt:        "force",
-			UserIDClaim:           "email",
-			OIDCEmailClaim:        "email",
-			OIDCGroupsClaim:       "groups",
-			OIDCAudienceClaims:    []string{"aud"},
+			ProviderType:          string(OIDCProvider),
+			ApprovalPrompt:        defaultApprovalPrompt,
+			UserIDClaim:           OIDCEmailClaim,
+			OIDCEmailClaim:        OIDCEmailClaim,
+			OIDCGroupsClaim:       OIDCGroupsClaim,
+			OIDCAudienceClaims:    []string{ClaimAud},
 			OIDCExtraAudiences:    []string{},
 			InsecureOIDCSkipNonce: true,
 		},
@@ -274,18 +288,18 @@ func (l *LegacyHeaders) getResponseHeaders() []Header {
 }
 
 func getBasicAuthHeader(preferEmailToUser bool, basicAuthPassword string) Header {
-	claim := "user"
+	claim := ClaimUser
 	if preferEmailToUser {
-		claim = "email"
+		claim = OIDCEmailClaim
 	}
 
 	return Header{
-		Name: "Authorization",
+		Name: headerAuthorization,
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
 					Claim:  claim,
-					Prefix: "Basic ",
+					Prefix: basicAuthPrefix,
 					BasicAuthPassword: &SecretSource{
 						Value: []byte(basicAuthPassword),
 					},
@@ -298,11 +312,11 @@ func getBasicAuthHeader(preferEmailToUser bool, basicAuthPassword string) Header
 func getPassUserHeaders(preferEmailToUser bool) []Header {
 	headers := []Header{
 		{
-			Name: "X-Forwarded-Groups",
+			Name: headerXForwardedGroups,
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "groups",
+						Claim: OIDCGroupsClaim,
 					},
 				},
 			},
@@ -312,11 +326,11 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 	if preferEmailToUser {
 		return append(headers,
 			Header{
-				Name: "X-Forwarded-User",
+				Name: headerXForwardedUser,
 				Values: []HeaderValue{
 					{
 						ClaimSource: &ClaimSource{
-							Claim: "email",
+							Claim: OIDCEmailClaim,
 						},
 					},
 				},
@@ -326,21 +340,21 @@ func getPassUserHeaders(preferEmailToUser bool) []Header {
 
 	return append(headers,
 		Header{
-			Name: "X-Forwarded-User",
+			Name: headerXForwardedUser,
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "user",
+						Claim: ClaimUser,
 					},
 				},
 			},
 		},
 		Header{
-			Name: "X-Forwarded-Email",
+			Name: headerXForwardedEmail,
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "email",
+						Claim: OIDCEmailClaim,
 					},
 				},
 			},
@@ -354,7 +368,7 @@ func getPassAccessTokenHeader() Header {
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim: "access_token",
+					Claim: ClaimAccessToken,
 				},
 			},
 		},
@@ -363,11 +377,11 @@ func getPassAccessTokenHeader() Header {
 
 func getAuthorizationHeader() Header {
 	return Header{
-		Name: "Authorization",
+		Name: headerAuthorization,
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim:  "id_token",
+					Claim:  ClaimIDToken,
 					Prefix: "Bearer ",
 				},
 			},
@@ -377,11 +391,11 @@ func getAuthorizationHeader() Header {
 
 func getPreferredUsernameHeader() Header {
 	return Header{
-		Name: "X-Forwarded-Preferred-Username",
+		Name: headerXForwardedPreferredUsername,
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim: "preferred_username",
+					Claim: ClaimPreferredUsername,
 				},
 			},
 		},
@@ -395,7 +409,7 @@ func getXAuthRequestHeaders() []Header {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "user",
+						Claim: ClaimUser,
 					},
 				},
 			},
@@ -405,7 +419,7 @@ func getXAuthRequestHeaders() []Header {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "email",
+						Claim: OIDCEmailClaim,
 					},
 				},
 			},
@@ -415,7 +429,7 @@ func getXAuthRequestHeaders() []Header {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "preferred_username",
+						Claim: ClaimPreferredUsername,
 					},
 				},
 			},
@@ -425,7 +439,7 @@ func getXAuthRequestHeaders() []Header {
 			Values: []HeaderValue{
 				{
 					ClaimSource: &ClaimSource{
-						Claim: "groups",
+						Claim: OIDCGroupsClaim,
 					},
 				},
 			},
@@ -441,7 +455,7 @@ func getXAuthRequestAccessTokenHeader() Header {
 		Values: []HeaderValue{
 			{
 				ClaimSource: &ClaimSource{
-					Claim: "access_token",
+					Claim: ClaimAccessToken,
 				},
 			},
 		},
@@ -468,7 +482,7 @@ func legacyServerFlagset() *pflag.FlagSet {
 	flagSet.String("metrics-secure-address", "", "the address /metrics will be served on for HTTPS clients (e.g. \":9100\")")
 	flagSet.String("metrics-tls-cert-file", "", "path to certificate file for secure metrics server")
 	flagSet.String("metrics-tls-key-file", "", "path to private key file for secure metrics server")
-	flagSet.String("http-address", "127.0.0.1:4180", "[http://]<addr>:<port> or unix://<path> or fd:<int> (case insensitive) to listen on for HTTP clients")
+	flagSet.String("http-address", defaultHTTPAddress, "[http://]<addr>:<port> or unix://<path> or fd:<int> (case insensitive) to listen on for HTTP clients")
 	flagSet.String("https-address", ":443", "<addr>:<port> to listen on for HTTPS clients")
 	flagSet.String("tls-cert-file", "", "path to certificate file")
 	flagSet.String("tls-key-file", "", "path to private key file")
@@ -535,7 +549,7 @@ func legacyProviderFlagSet() *pflag.FlagSet {
 	flagSet.String("client-secret", "", "the OAuth Client Secret")
 	flagSet.String("client-secret-file", "", "the file with OAuth Client Secret")
 
-	flagSet.String("provider", "oidc", "OAuth provider")
+	flagSet.String("provider", string(OIDCProvider), "OAuth provider")
 	flagSet.String("provider-display-name", "", "Provider display name")
 	flagSet.StringSlice("provider-ca-file", []string{}, "One or more paths to CA certificates that should be used when connecting to the provider.  If not specified, the default Go trust sources are used instead.")
 	flagSet.StringSlice("openshift-ca", []string{}, "(DEPRECATED: use --provider-ca-file) Path to CA certificate file for OpenShift OAuth server")
@@ -658,7 +672,7 @@ func mergeUniqueStrings(slices ...[]string) []string {
 }
 
 func (l *LegacyProvider) convert() (Providers, error) {
-	providers := Providers{}
+	providers := make(Providers, 0, 1)
 
 	// Merge ProviderCAFiles and OpenShiftCA for compatibility
 	allCAFiles := mergeUniqueStrings(l.ProviderCAFiles, l.OpenShiftCA)
@@ -721,11 +735,11 @@ func (l *LegacyProvider) convert() (Providers, error) {
 	case l.Prompt != "":
 		urlParams = append(urlParams, LoginURLParameter{Name: "prompt", Default: []string{l.Prompt}})
 	case l.ApprovalPrompt != "":
-		urlParams = append(urlParams, LoginURLParameter{Name: "approval_prompt", Default: []string{l.ApprovalPrompt}})
+		urlParams = append(urlParams, LoginURLParameter{Name: paramApprovalPrompt, Default: []string{l.ApprovalPrompt}})
 	default:
 		// match legacy behaviour by default - if neither prompt nor approval_prompt
 		// specified, use approval_prompt=force
-		urlParams = append(urlParams, LoginURLParameter{Name: "approval_prompt", Default: []string{"force"}})
+		urlParams = append(urlParams, LoginURLParameter{Name: paramApprovalPrompt, Default: []string{defaultApprovalPrompt}})
 	}
 
 	provider.LoginURLParameters = urlParams

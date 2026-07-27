@@ -8,7 +8,7 @@ import (
 )
 
 func validateUpstreams(upstreams options.UpstreamConfig) []string {
-	msgs := []string{}
+	msgs := make([]string, 0, len(upstreams.Upstreams))
 	ids := make(map[string]struct{})
 	paths := make(map[string]struct{})
 

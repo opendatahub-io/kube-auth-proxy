@@ -197,7 +197,7 @@ func Test_joinCookies_withUnderlineSuffix(t *testing.T) {
 	for testName, testCase := range testCases {
 		t.Run(testName, func(t *testing.T) {
 			cookieName := testCase.CookieName
-			var splitCookies []*http.Cookie
+			splitCookies := make([]*http.Cookie, 0, len(testCase.SplitOrder))
 			for _, splitSuffix := range testCase.SplitOrder {
 				cookie := &http.Cookie{
 					Name:  splitCookieName(cookieName, splitSuffix),

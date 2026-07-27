@@ -1,0 +1,67 @@
+name: Prepare Release
+run-name: Prepare release ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v3.5.0-ea.2)'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate version format
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-ea\.[0-9]+)?$ ]]; then
+          echo "::error::Version '$VERSION' does not match expected format (e.g. v3.5.0 or v3.5.0-ea.1)"
+          exit 1
+        fi
+
+    - name: Check out odh-release branch
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        ref: odh-release
+        fetch-depth: 0
+
+    - name: Merge main and update version
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        git config --local user.name "github-actions[bot]"
+        git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        git merge origin/main -m "merge main into release/${VERSION}"
+
+        sed -i "s|quay.io/opendatahub/odh-kube-auth-proxy:.*|quay.io/opendatahub/odh-kube-auth-proxy:${VERSION}|" \
+          .tekton/kube-auth-proxy-push.yaml
+
+        sed -i 's/== "main"/== "odh-release"/' \
+          .tekton/kube-auth-proxy-push.yaml
+
+    - name: Create pull request
+      uses: peter-evans/create-pull-request@a78ae501dd2c8c6fc514039b85a75c7404858a4b # v8.1.1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        branch: release/${{ inputs.version }}
+        base: odh-release
+        title: "release ${{ inputs.version }}"
+        commit-message: "chore: update quay tag for ODH ${{ inputs.version }} release"
+        body: |
+          Release branch created by GitHub Actions.
+
+          ### Changes
+          - Merged latest commits from `main` into `odh-release`
+          - Updated `.tekton/kube-auth-proxy-push.yaml` image tag to `${{ inputs.version }}`
+
+          ### Next steps
+          1. Review and merge this PR
+          2. Konflux will build automatically on merge
+          3. Once the Konflux build succeeds, the **Tag Release** workflow will auto-trigger to create the tag and GitHub release

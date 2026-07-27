@@ -2,15 +2,13 @@
 
 ## Project Overview
 
-Authentication proxy for OpenShift AI (RHOAI) that handles both external OIDC providers and OpenShift's internal OAuth service. FIPS-compliant. Includes `kube-rbac-proxy` as a subproject under `kube-rbac-proxy/`.
+Authentication proxy for OpenShift AI (RHOAI) that handles both external OIDC providers and OpenShift's internal OAuth service. FIPS-compliant.
 
 ## Architecture
 
 ```text
-cmd/                - CLI entry point (not used directly, main.go is root-level)
 pkg/                - Core packages (apis, encryption, options, version)
 providers/          - Authentication provider implementations (OIDC, OpenShift OAuth)
-kube-rbac-proxy/    - Embedded kube-rbac-proxy subproject (separate go.mod)
 contrib/            - Deployment manifests
 examples/           - Example configurations
 docs/               - Docusaurus documentation site

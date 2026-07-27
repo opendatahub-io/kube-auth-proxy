@@ -51,6 +51,6 @@ func redirectToHTTPS(httpsPort string, next http.Handler) http.Handler {
 			targetURL.Host = net.JoinHostPort(host, httpsPort)
 		}
 
-		http.Redirect(rw, req, targetURL.String(), http.StatusPermanentRedirect)
+		http.Redirect(rw, req, targetURL.String(), http.StatusPermanentRedirect) //nolint:gosec // G710 - scheme upgrade redirect, host preserved from original request
 	})
 }

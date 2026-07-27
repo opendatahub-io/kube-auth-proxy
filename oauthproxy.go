@@ -442,9 +442,8 @@ func buildSessionChain(opts *options.Options, provider providers.Provider, sessi
 			chain = chain.Append(middleware.NewOAuthSessionLoader(oauthSessionLoaders, opts.BearerTokenLoginFallback))
 		} else {
 			// OIDC: JWT loader for JWT tokens
-			jwtSessionLoaders := []middlewareapi.TokenToSessionFunc{
-				provider.CreateSessionFromToken,
-			}
+			jwtSessionLoaders := make([]middlewareapi.TokenToSessionFunc, 1, 1+len(opts.GetJWTBearerVerifiers()))
+			jwtSessionLoaders[0] = provider.CreateSessionFromToken
 			for _, verifier := range opts.GetJWTBearerVerifiers() {
 				jwtSessionLoaders = append(jwtSessionLoaders,
 					middlewareapi.CreateTokenToSessionFunc(verifier.Verify))
@@ -640,7 +639,7 @@ func (p *OAuthProxy) redirectToSignInWithCSRFError(rw http.ResponseWriter, req *
 
 // IsAllowedRequest is used to check if auth should be skipped for this request
 func (p *OAuthProxy) IsAllowedRequest(req *http.Request) bool {
-	isPreflightRequestAllowed := p.skipAuthPreflight && req.Method == "OPTIONS"
+	isPreflightRequestAllowed := p.skipAuthPreflight && req.Method == http.MethodOptions
 	return isPreflightRequestAllowed || p.isAllowedRoute(req) || p.isTrustedIP(req)
 }
 
@@ -724,7 +723,7 @@ func (p *OAuthProxy) SignInPage(rw http.ResponseWriter, req *http.Request, code 
 
 // ManualSignIn handles basic auth logins to the proxy
 func (p *OAuthProxy) ManualSignIn(req *http.Request) (string, bool, int) {
-	if req.Method != "POST" || p.basicAuthValidator == nil {
+	if req.Method != http.MethodPost || p.basicAuthValidator == nil {
 		return "", false, http.StatusOK
 	}
 	user := req.FormValue("username")
@@ -759,7 +758,7 @@ func (p *OAuthProxy) SignIn(rw http.ResponseWriter, req *http.Request) {
 			p.ErrorPage(rw, req, http.StatusInternalServerError, err.Error())
 			return
 		}
-		http.Redirect(rw, req, redirect, http.StatusFound)
+		http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
 	} else {
 		if p.SkipProviderButton {
 			p.OAuthStart(rw, req)
@@ -836,7 +835,7 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 	providerData := p.provider.Data()
 	if providerData.BackendLogoutURL != "" {
 		p.backendLogout(rw, req)
-		http.Redirect(rw, req, redirect, http.StatusFound)
+		http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
 		return
 	}
 
@@ -847,7 +846,7 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	http.Redirect(rw, req, redirect, http.StatusFound)
+	http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
 }
 
 // deleteOAuthAccessToken deletes the OAuthAccessToken resource from the cluster
@@ -951,7 +950,7 @@ func redactSensitiveQueryParams(rawURL string) string {
 	}
 
 	query := parsedURL.Query()
-	sensitiveParams := []string{"id_token_hint", "id_token", "access_token", "refresh_token"}
+	sensitiveParams := []string{"id_token_hint", options.ClaimIDToken, options.ClaimAccessToken, "refresh_token"}
 
 	for _, param := range sensitiveParams {
 		if query.Has(param) {
@@ -1061,7 +1060,7 @@ func (p *OAuthProxy) doOAuthStart(rw http.ResponseWriter, req *http.Request, ove
 		p.ErrorPage(rw, req, http.StatusInternalServerError, err.Error())
 		return
 	}
-	http.Redirect(rw, req, loginURL, http.StatusFound)
+	http.Redirect(rw, req, loginURL, http.StatusFound) //nolint:gosec // G710 - loginURL constructed from trusted provider config
 }
 
 // OAuthCallback is the OAuth2 authentication flow callback that finishes the
@@ -1159,7 +1158,7 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 			p.ErrorPage(rw, req, http.StatusInternalServerError, err.Error())
 			return
 		}
-		http.Redirect(rw, req, appRedirect, http.StatusFound)
+		http.Redirect(rw, req, appRedirect, http.StatusFound) //nolint:gosec // G710 - redirect validated by appDirector
 	} else {
 		logger.PrintAuthf(session.Email, req, logger.AuthFailure, "Invalid authentication via OAuth2: unauthorized")
 		p.ErrorPage(rw, req, http.StatusForbidden, "Invalid session: unauthorized")

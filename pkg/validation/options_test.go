@@ -35,7 +35,7 @@ func testOptions() *options.Options {
 }
 
 func errorMsg(msgs []string) string {
-	result := make([]string, 0)
+	result := make([]string, 0, 1+len(msgs))
 	result = append(result, "invalid configuration:")
 	result = append(result, msgs...)
 	return strings.Join(result, "\n  ")

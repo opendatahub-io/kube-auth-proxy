@@ -6,10 +6,25 @@ const (
 
 	// OIDCGroupsClaim is the generic groups claim used by the OIDC provider.
 	OIDCGroupsClaim = "groups"
+
+	// ClaimAccessToken is the claim name for access tokens.
+	ClaimAccessToken = "access_token"
+
+	// ClaimIDToken is the claim name for ID tokens.
+	ClaimIDToken = "id_token"
+
+	// ClaimPreferredUsername is the claim name for the preferred username.
+	ClaimPreferredUsername = "preferred_username"
+
+	// ClaimUser is the claim name for the user identifier.
+	ClaimUser = "user"
+
+	// ClaimAud is the audience claim name.
+	ClaimAud = "aud"
 )
 
 // OIDCAudienceClaims is the generic audience claim list used by the OIDC provider.
-var OIDCAudienceClaims = []string{"aud"}
+var OIDCAudienceClaims = []string{ClaimAud}
 
 // The provider can be selected using the `provider` configuration value, or
 // set in the [`providers` array using
@@ -138,7 +153,7 @@ type OIDCOptions struct {
 func providerDefaults() Providers {
 	providers := Providers{
 		{
-			Type: "oidc",
+			Type: OIDCProvider,
 			OIDCConfig: OIDCOptions{
 				InsecureAllowUnverifiedEmail: false,
 				InsecureSkipNonce:            true,
