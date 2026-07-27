@@ -2,9 +2,11 @@ package providers
 
 import (
 	"context"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -410,6 +412,183 @@ func TestOpenShiftProviderCreateSessionFromTokenWithGroups(t *testing.T) {
 	assert.Contains(t, session.Groups, "developers")
 	assert.Contains(t, session.Groups, "viewers")
 	assert.Equal(t, 3, len(session.Groups))
+}
+
+func TestOpenShiftProviderDiscoveryRetriesAfterFailure(t *testing.T) {
+	callCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/oauth-authorization-server" {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("API server temporarily unavailable"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"authorization_endpoint": "https://oauth.example.com/authorize",
+				"token_endpoint": "https://oauth.example.com/token"
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	// Point the Kubernetes service env vars to our TLS mock server
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", serverURL.Hostname())
+	t.Setenv("KUBERNETES_SERVICE_PORT", serverURL.Port())
+
+	provider := &OpenShiftProvider{
+		ProviderData: &ProviderData{},
+	}
+
+	// Use the TLS test server's client for discovery (bypass CA validation)
+	client := server.Client()
+
+	// First call: discovery fails (503)
+	login, redeem, err := provider.discoverOpenShiftOAuth(client)
+	assert.Error(t, err, "Discovery should fail on first attempt")
+	assert.Nil(t, login)
+	assert.Nil(t, redeem)
+
+	// Second call: discovery succeeds (server returns 200)
+	login, redeem, err = provider.discoverOpenShiftOAuth(client)
+	assert.NoError(t, err, "Discovery should succeed on second attempt")
+	assert.NotNil(t, login)
+	assert.NotNil(t, redeem)
+	assert.Equal(t, "https://oauth.example.com/authorize", login.String())
+	assert.Equal(t, "https://oauth.example.com/token", redeem.String())
+}
+
+func TestOpenShiftProviderGetLoginURLRetriesAfterFailure(t *testing.T) {
+	callCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/oauth-authorization-server" {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("API server temporarily unavailable"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"authorization_endpoint": "https://oauth.example.com/authorize",
+				"token_endpoint": "https://oauth.example.com/token"
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", serverURL.Hostname())
+	t.Setenv("KUBERNETES_SERVICE_PORT", serverURL.Port())
+
+	caFile := writeTestServerCA(t, server)
+
+	provider := &OpenShiftProvider{
+		ProviderData: &ProviderData{},
+		CAFiles:      []string{caFile},
+	}
+
+	// First call: discovery fails (503), GetLoginURL returns empty
+	result := provider.GetLoginURL("http://localhost/callback", "state123", "", url.Values{})
+	assert.Empty(t, result, "GetLoginURL should return empty when discovery fails")
+	assert.Nil(t, provider.LoginURL, "LoginURL should not be set after failure")
+
+	// Second call: discovery succeeds, GetLoginURL returns a valid URL
+	result = provider.GetLoginURL("http://localhost/callback", "state123", "", url.Values{})
+	assert.NotEmpty(t, result, "GetLoginURL should return a URL after discovery succeeds on retry")
+	assert.NotNil(t, provider.LoginURL, "LoginURL should be set after successful discovery")
+	assert.Equal(t, "https://oauth.example.com/authorize", provider.LoginURL.String())
+	assert.NotNil(t, provider.RedeemURL, "RedeemURL should be set after successful discovery")
+	assert.Equal(t, "https://oauth.example.com/token", provider.RedeemURL.String())
+
+	// Third call: should use cached LoginURL (no new discovery call)
+	previousCallCount := callCount
+	result = provider.GetLoginURL("http://localhost/callback", "state123", "", url.Values{})
+	assert.NotEmpty(t, result)
+	assert.Equal(t, previousCallCount, callCount, "No additional discovery calls should be made after success")
+}
+
+func TestOpenShiftProviderRedeemRetriesDiscoveryAfterFailure(t *testing.T) {
+	callCount := 0
+	var serverAddr string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("API server temporarily unavailable"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"authorization_endpoint": "` + serverAddr + `/oauth/authorize",
+				"token_endpoint": "` + serverAddr + `/oauth/token"
+			}`))
+		case "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"access_token": "test-token"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	serverAddr = server.URL
+
+	parsedURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", parsedURL.Hostname())
+	t.Setenv("KUBERNETES_SERVICE_PORT", parsedURL.Port())
+
+	caFile := writeTestServerCA(t, server)
+
+	provider := &OpenShiftProvider{
+		ProviderData: &ProviderData{
+			ClientID:     "test-client",
+			ClientSecret: "test-secret",
+		},
+		CAFiles: []string{caFile},
+	}
+
+	// First call: discovery fails
+	_, err = provider.Redeem(context.Background(), "http://localhost/callback", "code123", "")
+	assert.Error(t, err, "Redeem should fail when discovery fails")
+	assert.Contains(t, err.Error(), "failed to discover redeem URL")
+
+	// Second call: discovery succeeds, token exchange works
+	session, err := provider.Redeem(context.Background(), "http://localhost/callback", "code123", "")
+	assert.NoError(t, err, "Redeem should succeed after discovery recovers")
+	assert.NotNil(t, session)
+	assert.Equal(t, "test-token", session.AccessToken)
+}
+
+// writeTestServerCA writes the httptest.TLSServer's CA certificate to a temp file
+// and returns the file path. The caller should defer os.Remove(path).
+func writeTestServerCA(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	cert := server.Certificate()
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert.Raw,
+	})
+	f, err := os.CreateTemp(t.TempDir(), "test-ca-*.pem")
+	require.NoError(t, err)
+	_, err = f.Write(certPEM)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	return f.Name()
 }
 
 // Helper function to test cache key formatting

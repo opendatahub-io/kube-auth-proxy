@@ -8,7 +8,7 @@ ARG VERSION
 # For FIPS builds with CGO, we must build on the native target platform
 # because cross-compilation with CGO requires cross-compiler toolchains
 # which are not readily available in the UBI base images.
-FROM --platform=${TARGETPLATFORM} registry.access.redhat.com/ubi9/go-toolset:1.25 AS builder
+FROM --platform=${TARGETPLATFORM} registry.access.redhat.com/ubi9/go-toolset:1.26 AS builder
 
 # Switch to root for build permissions
 USER root
@@ -22,13 +22,6 @@ RUN go mod download
 
 # Now pull in our code
 COPY . .
-
-# Setup kube-rbac-proxy dependencies
-WORKDIR /workspace/kube-rbac-proxy
-RUN go mod download
-
-# Go back to main workdir
-WORKDIR /workspace
 
 # Re-declare TARGETPLATFORM and VERSION for use in RUN commands
 # (ARGs before FROM need to be re-declared to be available in build stages)
@@ -56,12 +49,7 @@ RUN case ${TARGETPLATFORM} in \
     go build -a -tags strictfipsruntime \
     -ldflags="-X github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version.VERSION=${VERSION}" \
     -o kube-auth-proxy github.com/opendatahub-io/kube-auth-proxy/v1 && \
-    touch jwt_signing_key.pem && \
-    printf "Building kube-rbac-proxy for arch ${GOARCH}\n" && \
-    VERSION_SEMVER=$(echo "${VERSION}" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "v0.19.1") && \
-    cd kube-rbac-proxy && GOARCH=${GOARCH} VERSION="${VERSION}" VERSION_SEMVER="${VERSION_SEMVER}" make build && \
-    cd .. && printf "Building entrypoint for arch ${GOARCH}\n" && \
-    CGO_ENABLED=1 GOOS=linux GOARCH=${GOARCH} GOEXPERIMENT=strictfipsruntime go build -a -tags strictfipsruntime -o entrypoint ./cmd/entrypoint
+    touch jwt_signing_key.pem
 
 # Copy binary to FIPS-compliant runtime image
 FROM --platform=${TARGETPLATFORM} registry.access.redhat.com/ubi9/ubi-minimal:latest
@@ -70,20 +58,17 @@ ARG VERSION
 
 WORKDIR /
 COPY --from=builder /workspace/kube-auth-proxy /bin/kube-auth-proxy
-COPY --from=builder /workspace/kube-rbac-proxy/_output/kube-rbac-proxy /bin/kube-rbac-proxy
-COPY --from=builder /workspace/entrypoint /bin/entrypoint
 COPY --chown=1001:0 --from=builder /workspace/jwt_signing_key.pem /etc/ssl/private/jwt_signing_key.pem
 
 # Copy license files
 RUN mkdir -p /licenses
 COPY --from=builder /workspace/LICENSE /licenses/LICENSE.kube-auth-proxy.txt
-COPY --from=builder /workspace/kube-rbac-proxy/LICENSE /licenses/LICENSE.kube-rbac-proxy.txt
 
 # Set proper permissions for non-root execution
 RUN chown -R 1001:0 /etc/ssl/private && \
     chmod -R g=u /etc/ssl/private && \
-    chown 1001:0 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint && \
-    chmod 755 /bin/kube-auth-proxy /bin/kube-rbac-proxy /bin/entrypoint && \
+    chown 1001:0 /bin/kube-auth-proxy && \
+    chmod 755 /bin/kube-auth-proxy && \
     chown -R 1001:0 /licenses && \
     chmod -R 644 /licenses/*
 
@@ -97,4 +82,4 @@ LABEL org.opencontainers.image.licenses=MIT \
       org.opencontainers.image.title=kube-auth-proxy \
       org.opencontainers.image.version=${VERSION}
 
-ENTRYPOINT ["/bin/entrypoint"]
+ENTRYPOINT ["/bin/kube-auth-proxy"]

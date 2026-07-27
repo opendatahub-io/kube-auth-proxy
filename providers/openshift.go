@@ -49,10 +49,6 @@ const (
 type OpenShiftProvider struct {
 	*ProviderData
 	useSystemTrustStore bool
-	discoveryOnce       sync.Once
-	discoveryErr        error
-	discoveredLogin     *url.URL
-	discoveredRedeem    *url.URL
 
 	// CAFiles contains paths to custom CA certificate files for TLS connections
 	// to the OpenShift OAuth server and API endpoints
@@ -61,6 +57,11 @@ type OpenShiftProvider struct {
 	// httpClientCache caches HTTP clients by CA configuration to avoid
 	// recreating clients when CA certificates haven't changed
 	httpClientCache sync.Map
+
+	// discoveryMu guards the check-then-act on LoginURL/RedeemURL during
+	// on-demand OAuth endpoint discovery, preventing concurrent goroutines
+	// from racing on the shared provider state.
+	discoveryMu sync.Mutex
 }
 
 // NewOpenShiftProvider creates a new OpenShiftProvider instance.
@@ -122,38 +123,52 @@ func NewOpenShiftProvider(p *ProviderData, cfg options.Provider) (*OpenShiftProv
 
 // GetLoginURL returns the OAuth login URL, using discovery if not configured
 func (p *OpenShiftProvider) GetLoginURL(redirectURI, state, _ string, extraParams url.Values) string {
-	// If LoginURL is not configured, try auto-discovery as a convenience
 	if p.LoginURL == nil || p.LoginURL.String() == "" {
-		logger.Printf("LoginURL not configured, attempting auto-discovery from Kubernetes API")
-		client, err := p.newOpenShiftClient()
-		if err != nil {
-			logger.Errorf("Failed to create OpenShift client for discovery: %v", err)
-			logger.Printf("Please configure --login-url manually")
-			return ""
-		}
-		p.discoveryOnce.Do(func() {
-			p.discoveredLogin, p.discoveredRedeem, p.discoveryErr = p.discoverOpenShiftOAuth(client)
-		})
-		if p.discoveryErr != nil || p.discoveredLogin == nil {
-			if p.discoveryErr != nil {
-				logger.Errorf("Failed to discover OpenShift OAuth endpoints: %v", p.discoveryErr)
+		p.discoveryMu.Lock()
+		defer p.discoveryMu.Unlock()
+		// Double-check after acquiring the lock (another goroutine may have completed discovery)
+		if p.LoginURL == nil || p.LoginURL.String() == "" {
+			logger.Printf("LoginURL not configured, attempting auto-discovery from Kubernetes API")
+			client, err := p.newOpenShiftClient()
+			if err != nil {
+				logger.Errorf("Failed to create OpenShift client for discovery: %v", err)
+				logger.Printf("Please configure --login-url manually")
+				return ""
 			}
-			logger.Printf("Please configure --login-url and --redeem-url manually")
-			return ""
-		}
-		p.LoginURL = p.discoveredLogin
-		if p.RedeemURL == nil || p.RedeemURL.String() == "" {
-			p.RedeemURL = p.discoveredRedeem
-		}
-		logger.Printf("Auto-discovered LoginURL: %s", p.LoginURL.String())
-		if p.RedeemURL != nil {
-			logger.Printf("Auto-discovered RedeemURL: %s", p.RedeemURL.String())
+			loginURL, redeemURL, err := p.discoverOpenShiftOAuth(client)
+			if err != nil {
+				logger.Errorf("Failed to discover OpenShift OAuth endpoints: %v", err)
+				logger.Printf("Please configure --login-url and --redeem-url manually")
+				return ""
+			}
+			p.LoginURL = loginURL
+			if p.RedeemURL == nil || p.RedeemURL.String() == "" {
+				p.RedeemURL = redeemURL
+			}
+			logger.Printf("Auto-discovered LoginURL: %s", p.LoginURL.String())
+			if p.RedeemURL != nil {
+				logger.Printf("Auto-discovered RedeemURL: %s", p.RedeemURL.String())
+			}
 		}
 	}
 
-	// Build the complete OAuth2 authorization URL using the standard helper
 	loginURL := makeLoginURL(p.Data(), redirectURI, state, extraParams)
 	return loginURL.String()
+}
+
+// discoverRedeemURL performs thread-safe on-demand discovery of the RedeemURL.
+func (p *OpenShiftProvider) discoverRedeemURL(client *http.Client) (*url.URL, error) {
+	p.discoveryMu.Lock()
+	defer p.discoveryMu.Unlock()
+	if p.RedeemURL != nil && p.RedeemURL.String() != "" {
+		return p.RedeemURL, nil
+	}
+	_, discoveredRedeem, err := p.discoverOpenShiftOAuth(client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover redeem URL: %v", err)
+	}
+	p.RedeemURL = discoveredRedeem
+	return discoveredRedeem, nil
 }
 
 // Redeem exchanges the authorization code for an access token
@@ -170,17 +185,11 @@ func (p *OpenShiftProvider) Redeem(ctx context.Context, redirectURL, code, codeV
 	// Get redeem URL from discovery if not configured
 	redeemURL := p.RedeemURL
 	if redeemURL == nil || redeemURL.String() == "" {
-		p.discoveryOnce.Do(func() {
-			p.discoveredLogin, p.discoveredRedeem, p.discoveryErr = p.discoverOpenShiftOAuth(client)
-		})
-		if p.discoveryErr != nil || p.discoveredRedeem == nil {
-			return nil, fmt.Errorf("failed to discover redeem URL: %v", p.discoveryErr)
+		discovered, discoveryErr := p.discoverRedeemURL(client)
+		if discoveryErr != nil {
+			return nil, discoveryErr
 		}
-		redeemURL = p.discoveredRedeem
-		// Persist for subsequent calls if not explicitly configured
-		if p.RedeemURL == nil || p.RedeemURL.String() == "" {
-			p.RedeemURL = redeemURL
-		}
+		redeemURL = discovered
 	}
 
 	params := url.Values{}
@@ -528,7 +537,7 @@ func (p *OpenShiftProvider) discoverOpenShiftOAuth(client *http.Client) (*url.UR
 // for auto-detection when running inside a cluster, falling back to the default
 // Kubernetes service DNS name.
 func getKubeAPIURLWithPath(path string) string {
-	scheme := "https"
+	scheme := schemeHTTPS
 	host := kubernetesDefaultService
 
 	if h := os.Getenv("KUBERNETES_SERVICE_HOST"); len(h) > 0 {

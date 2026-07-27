@@ -33,7 +33,7 @@ type builder struct {
 func New(endpoint string) Builder {
 	return &builder{
 		endpoint: endpoint,
-		method:   "GET",
+		method:   http.MethodGet,
 	}
 }
 
