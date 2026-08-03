@@ -58,11 +58,12 @@ func newTestValidator(mockFunc func(ctx context.Context, tr *authenticationv1.To
 		},
 	}
 	return &TokenReviewValidator{
-		client:    client,
-		audiences: audiences,
-		inflight:  make(map[string]*inflightCall),
-		cache:     make(map[string]*tokenCacheEntry),
-		cacheTTL:  defaultCacheTTL,
+		client:        client,
+		audiences:     audiences,
+		inflight:      make(map[string]*inflightCall),
+		cache:         make(map[string]*tokenCacheEntry),
+		cacheTTL:      defaultCacheTTL,
+		reviewTimeout: defaultReviewTimeout,
 	}
 }
 
@@ -369,6 +370,114 @@ func TestTokenReviewValidator_DifferentTokensNotDeduplicated(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int32(3), apiCalls.Load(), "different tokens should each produce a separate API call")
+}
+
+func TestTokenReviewValidator_FollowerSurvivesLeaderCancel(t *testing.T) {
+	gate := make(chan struct{})
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		<-gate
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	leaderCtx, leaderCancel := context.WithCancel(context.Background())
+	followerCtx := context.Background()
+
+	var wg sync.WaitGroup
+	var leaderErr, followerErr error
+	var followerSession *sessions.SessionState
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, leaderErr = validator.ValidateToken(leaderCtx, "shared-token")
+	}()
+	go func() {
+		defer wg.Done()
+		time.Sleep(10 * time.Millisecond)
+		followerSession, followerErr = validator.ValidateToken(followerCtx, "shared-token")
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	leaderCancel()
+	time.Sleep(10 * time.Millisecond)
+	close(gate)
+	wg.Wait()
+
+	assert.Error(t, leaderErr, "leader should get context canceled error")
+	require.NoError(t, followerErr, "follower should succeed even after leader cancels")
+	assert.Equal(t, "system:serviceaccount:ns:sa", followerSession.User)
+}
+
+func TestTokenReviewValidator_CacheEvictsExpired(t *testing.T) {
+	var apiCalls atomic.Int32
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+	validator.cacheTTL = 50 * time.Millisecond
+
+	_, err := validator.ValidateToken(context.Background(), "token-a")
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	_, err = validator.ValidateToken(context.Background(), "token-b")
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+	validator.cacheMu.RLock()
+	cacheLen := len(validator.cache)
+	validator.cacheMu.RUnlock()
+
+	assert.Equal(t, 1, cacheLen, "expired entry for token-a should have been evicted when token-b was cached")
+}
+
+func TestTokenReviewValidator_SessionTimeCopyIsolation(t *testing.T) {
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	s1, err := validator.ValidateToken(context.Background(), "time-test-token")
+	require.NoError(t, err)
+
+	originalExpiry := *s1.ExpiresOn
+	*s1.ExpiresOn = s1.ExpiresOn.Add(1 * time.Hour)
+
+	s2, err := validator.ValidateToken(context.Background(), "time-test-token")
+	require.NoError(t, err)
+	assert.Equal(t, originalExpiry, *s2.ExpiresOn, "cached session ExpiresOn should not be affected by mutations to previously returned copies")
 }
 
 func TestTokenReviewValidator_SessionCopyIsolation(t *testing.T) {

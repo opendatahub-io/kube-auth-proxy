@@ -40,25 +40,30 @@ type TokenReviewValidator struct {
 	sfMu     sync.Mutex
 	inflight map[string]*inflightCall
 
-	cacheMu  sync.RWMutex
-	cache    map[string]*tokenCacheEntry
-	cacheTTL time.Duration
+	cacheMu       sync.RWMutex
+	cache         map[string]*tokenCacheEntry
+	cacheTTL      time.Duration
+	reviewTimeout time.Duration
 }
 
 type inflightCall struct {
-	wg  sync.WaitGroup
-	res *sessions.SessionState
-	err error
+	done chan struct{}
+	res  *sessions.SessionState
+	err  error
 }
 
 // TokenReviewConfig holds optional tuning parameters for the TokenReview validator.
 type TokenReviewConfig struct {
-	QPS      float32
-	Burst    int
-	CacheTTL time.Duration
+	QPS           float32
+	Burst         int
+	CacheTTL      time.Duration
+	ReviewTimeout time.Duration
 }
 
-const defaultCacheTTL = 10 * time.Second
+const (
+	defaultCacheTTL      = 10 * time.Second
+	defaultReviewTimeout = 30 * time.Second
+)
 
 // NewTokenReviewValidator creates a new TokenReview validator.
 // If kubeconfig is empty, it uses in-cluster configuration.
@@ -109,12 +114,18 @@ func NewTokenReviewValidator(kubeconfig string, audiences []string, cfg *TokenRe
 		cacheTTL = cfg.CacheTTL
 	}
 
+	reviewTimeout := defaultReviewTimeout
+	if cfg != nil && cfg.ReviewTimeout > 0 {
+		reviewTimeout = cfg.ReviewTimeout
+	}
+
 	return &TokenReviewValidator{
-		client:    client,
-		audiences: audiences,
-		inflight:  make(map[string]*inflightCall),
-		cache:     make(map[string]*tokenCacheEntry),
-		cacheTTL:  cacheTTL,
+		client:        client,
+		audiences:     audiences,
+		inflight:      make(map[string]*inflightCall),
+		cache:         make(map[string]*tokenCacheEntry),
+		cacheTTL:      cacheTTL,
+		reviewTimeout: reviewTimeout,
 	}, nil
 }
 
@@ -136,49 +147,73 @@ func tokenKey(token string) string {
 func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) (*sessions.SessionState, error) {
 	key := tokenKey(token)
 
-	// Check cache first
-	v.cacheMu.RLock()
-	if entry, ok := v.cache[key]; ok && time.Now().Before(entry.expiresAt) {
+	if v.cacheTTL > 0 {
+		v.cacheMu.RLock()
+		if entry, ok := v.cache[key]; ok && time.Now().Before(entry.expiresAt) {
+			v.cacheMu.RUnlock()
+			return copySession(entry.session), nil
+		}
 		v.cacheMu.RUnlock()
-		return copySession(entry.session), nil
 	}
-	v.cacheMu.RUnlock()
 
-	// Singleflight: deduplicate concurrent calls for the same token
 	v.sfMu.Lock()
 	if call, ok := v.inflight[key]; ok {
 		v.sfMu.Unlock()
-		call.wg.Wait()
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		if call.err != nil {
 			return nil, call.err
 		}
 		return copySession(call.res), nil
 	}
-	call := &inflightCall{}
-	call.wg.Add(1)
+	call := &inflightCall{done: make(chan struct{})}
 	v.inflight[key] = call
 	v.sfMu.Unlock()
 
-	call.res, call.err = v.doTokenReview(ctx, token)
-	call.wg.Done()
+	go func() {
+		callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), v.reviewTimeout)
+		defer cancel()
+		call.res, call.err = v.doTokenReview(callCtx, token)
 
-	v.sfMu.Lock()
-	delete(v.inflight, key)
-	v.sfMu.Unlock()
+		if call.err == nil && v.cacheTTL > 0 {
+			v.cacheMu.Lock()
+			v.sweepExpired()
+			v.cache[key] = &tokenCacheEntry{
+				session:   call.res,
+				expiresAt: time.Now().Add(v.cacheTTL),
+			}
+			v.cacheMu.Unlock()
+		}
+
+		close(call.done)
+
+		v.sfMu.Lock()
+		delete(v.inflight, key)
+		v.sfMu.Unlock()
+	}()
+
+	select {
+	case <-call.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	if call.err != nil {
 		return nil, call.err
 	}
-
-	// Cache successful result
-	v.cacheMu.Lock()
-	v.cache[key] = &tokenCacheEntry{
-		session:   call.res,
-		expiresAt: time.Now().Add(v.cacheTTL),
-	}
-	v.cacheMu.Unlock()
-
 	return copySession(call.res), nil
+}
+
+func (v *TokenReviewValidator) sweepExpired() {
+	now := time.Now()
+	for key, entry := range v.cache {
+		if now.After(entry.expiresAt) {
+			delete(v.cache, key)
+		}
+	}
 }
 
 func (v *TokenReviewValidator) doTokenReview(ctx context.Context, token string) (*sessions.SessionState, error) {
@@ -218,5 +253,13 @@ func copySession(s *sessions.SessionState) *sessions.SessionState {
 	copy(groups, s.Groups)
 	cp := *s
 	cp.Groups = groups
+	if s.CreatedAt != nil {
+		t := *s.CreatedAt
+		cp.CreatedAt = &t
+	}
+	if s.ExpiresOn != nil {
+		t := *s.ExpiresOn
+		cp.ExpiresOn = &t
+	}
 	return &cp
 }

@@ -3,6 +3,7 @@ package options
 import (
 	"crypto"
 	"net/url"
+	"time"
 
 	ipapi "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/ip"
 	internaloidc "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/providers/oidc"
@@ -70,8 +71,9 @@ type Options struct {
 	EnableK8sTokenValidation bool     `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
 	KubernetesAudiences      []string `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"` // Optional: when empty, uses default K8s API server issuer/audience
 	Kubeconfig               string   `flag:"kubeconfig" cfg:"kubeconfig"`
-	KubeAPIQPS               float32  `flag:"kube-api-qps" cfg:"kube_api_qps"`
-	KubeAPIBurst             int      `flag:"kube-api-burst" cfg:"kube_api_burst"`
+	KubeAPIQPS               float32       `flag:"kube-api-qps" cfg:"kube_api_qps"`
+	KubeAPIBurst             int           `flag:"kube-api-burst" cfg:"kube_api_burst"`
+	KubeAPICacheTTL          time.Duration `flag:"kube-api-cache-ttl" cfg:"kube_api_cache_ttl"`
 
 	SignatureKey    string `flag:"signature-key" cfg:"signature_key"`
 	GCPHealthChecks bool   `flag:"gcp-healthchecks" cfg:"gcp_healthchecks"`
@@ -120,6 +122,7 @@ func NewOptions() *Options {
 		Logging:                  loggingDefaults(),
 		KubeAPIQPS:               50,
 		KubeAPIBurst:             100,
+		KubeAPICacheTTL:          10 * time.Second,
 	}
 }
 
@@ -153,6 +156,7 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.String("kubeconfig", "", "path to kubeconfig file for Kubernetes API access (optional, uses in-cluster config if not set)")
 	flagSet.Float32("kube-api-qps", 50, "QPS rate limit for Kubernetes API requests (TokenReview). The default of 50 prevents timeouts under concurrent load")
 	flagSet.Int("kube-api-burst", 100, "burst limit for Kubernetes API requests (TokenReview). Allows short bursts above the QPS rate")
+	flagSet.Duration("kube-api-cache-ttl", 10*time.Second, "TTL for cached TokenReview results. A revoked token may remain valid for up to this duration")
 
 	flagSet.StringSlice("email-domain", []string{}, "authenticate emails with the specified domain (may be given multiple times). Use * to authenticate any email")
 	flagSet.StringSlice("whitelist-domain", []string{}, "allowed domains for redirection after authentication. Prefix domain with a . or a *. to allow subdomains (eg .example.com, *.example.com)")

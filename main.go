@@ -63,8 +63,9 @@ func main() {
 			opts.Kubeconfig,
 			opts.KubernetesAudiences,
 			&k8s.TokenReviewConfig{
-				QPS:   opts.KubeAPIQPS,
-				Burst: opts.KubeAPIBurst,
+				QPS:      opts.KubeAPIQPS,
+				Burst:    opts.KubeAPIBurst,
+				CacheTTL: opts.KubeAPICacheTTL,
 			},
 		)
 		if err != nil {
