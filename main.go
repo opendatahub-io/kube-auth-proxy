@@ -62,6 +62,10 @@ func main() {
 		k8sTokenValidator, err = k8s.NewTokenReviewValidator(
 			opts.Kubeconfig,
 			opts.KubernetesAudiences,
+			&k8s.TokenReviewConfig{
+				QPS:   opts.KubeAPIQPS,
+				Burst: opts.KubeAPIBurst,
+			},
 		)
 		if err != nil {
 			logger.Fatalf("ERROR: Failed to create K8s TokenReview validator: %v", err)

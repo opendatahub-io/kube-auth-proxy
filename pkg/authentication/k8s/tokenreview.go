@@ -2,8 +2,10 @@ package k8s
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -20,13 +22,43 @@ type Validator interface {
 	ValidateToken(ctx context.Context, token string) (*sessions.SessionState, error)
 }
 
+type tokenCacheEntry struct {
+	session   *sessions.SessionState
+	expiresAt time.Time
+}
+
 // TokenReviewValidator validates Kubernetes service account tokens using the TokenReview API.
 // This is independent of the configured provider (OpenShift OAuth, OIDC, etc.)
 // and allows service accounts to authenticate alongside human users.
+//
+// It uses singleflight to deduplicate concurrent TokenReview calls for the same
+// token and caches successful results for a short TTL to reduce API server load.
 type TokenReviewValidator struct {
 	client    kubernetes.Interface
 	audiences []string
+
+	sfMu     sync.Mutex
+	inflight map[string]*inflightCall
+
+	cacheMu  sync.RWMutex
+	cache    map[string]*tokenCacheEntry
+	cacheTTL time.Duration
 }
+
+type inflightCall struct {
+	wg  sync.WaitGroup
+	res *sessions.SessionState
+	err error
+}
+
+// TokenReviewConfig holds optional tuning parameters for the TokenReview validator.
+type TokenReviewConfig struct {
+	QPS      float32
+	Burst    int
+	CacheTTL time.Duration
+}
+
+const defaultCacheTTL = 10 * time.Second
 
 // NewTokenReviewValidator creates a new TokenReview validator.
 // If kubeconfig is empty, it uses in-cluster configuration.
@@ -44,7 +76,7 @@ type TokenReviewValidator struct {
 // Note: There is a known limitation where client-go does not automatically reload CA certificates during
 // cluster CA rotation. Pods may need to be restarted after CA rotation.
 // See: https://github.com/kubernetes/kubernetes/issues/119483
-func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenReviewValidator, error) {
+func NewTokenReviewValidator(kubeconfig string, audiences []string, cfg *TokenReviewConfig) (*TokenReviewValidator, error) {
 	var config *rest.Config
 	var err error
 
@@ -58,15 +90,38 @@ func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenRevie
 		return nil, err
 	}
 
+	if cfg != nil {
+		if cfg.QPS > 0 {
+			config.QPS = cfg.QPS
+		}
+		if cfg.Burst > 0 {
+			config.Burst = cfg.Burst
+		}
+	}
+
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
 	}
 
+	cacheTTL := defaultCacheTTL
+	if cfg != nil && cfg.CacheTTL > 0 {
+		cacheTTL = cfg.CacheTTL
+	}
+
 	return &TokenReviewValidator{
 		client:    client,
 		audiences: audiences,
+		inflight:  make(map[string]*inflightCall),
+		cache:     make(map[string]*tokenCacheEntry),
+		cacheTTL:  cacheTTL,
 	}, nil
+}
+
+// tokenKey returns a cache-safe hash of the token to avoid holding raw tokens in map keys.
+func tokenKey(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", h)
 }
 
 // ValidateToken validates a service account token using the Kubernetes TokenReview API.
@@ -75,7 +130,58 @@ func NewTokenReviewValidator(kubeconfig string, audiences []string) (*TokenRevie
 // whether the token is valid and not expired. If audiences are configured, it also validates
 // the token matches the required audiences. When audiences are omitted, the default
 // Kubernetes API server issuer and audience validation is used.
+//
+// Concurrent calls for the same token are deduplicated via singleflight, and
+// successful results are cached for a short TTL to reduce API server load.
 func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) (*sessions.SessionState, error) {
+	key := tokenKey(token)
+
+	// Check cache first
+	v.cacheMu.RLock()
+	if entry, ok := v.cache[key]; ok && time.Now().Before(entry.expiresAt) {
+		v.cacheMu.RUnlock()
+		return copySession(entry.session), nil
+	}
+	v.cacheMu.RUnlock()
+
+	// Singleflight: deduplicate concurrent calls for the same token
+	v.sfMu.Lock()
+	if call, ok := v.inflight[key]; ok {
+		v.sfMu.Unlock()
+		call.wg.Wait()
+		if call.err != nil {
+			return nil, call.err
+		}
+		return copySession(call.res), nil
+	}
+	call := &inflightCall{}
+	call.wg.Add(1)
+	v.inflight[key] = call
+	v.sfMu.Unlock()
+
+	call.res, call.err = v.doTokenReview(ctx, token)
+	call.wg.Done()
+
+	v.sfMu.Lock()
+	delete(v.inflight, key)
+	v.sfMu.Unlock()
+
+	if call.err != nil {
+		return nil, call.err
+	}
+
+	// Cache successful result
+	v.cacheMu.Lock()
+	v.cache[key] = &tokenCacheEntry{
+		session:   call.res,
+		expiresAt: time.Now().Add(v.cacheTTL),
+	}
+	v.cacheMu.Unlock()
+
+	return copySession(call.res), nil
+}
+
+func (v *TokenReviewValidator) doTokenReview(ctx context.Context, token string) (*sessions.SessionState, error) {
 	tr := &authenticationv1.TokenReview{
 		Spec: authenticationv1.TokenReviewSpec{
 			Token:     token,
@@ -95,8 +201,6 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 		return nil, errors.New("token not authenticated by TokenReview API")
 	}
 
-	// Create session from TokenReview response
-	// Username format: "system:serviceaccount:namespace:serviceaccount-name"
 	session := &sessions.SessionState{
 		User:        result.Status.User.Username,
 		Email:       result.Status.User.Username + "@cluster.local",
@@ -104,11 +208,15 @@ func (v *TokenReviewValidator) ValidateToken(ctx context.Context, token string) 
 		AccessToken: token,
 	}
 	session.CreatedAtNow()
-
-	// Service account tokens can have expiration, but we set a short session expiry
-	// since this is a single request session. The actual token expiration is enforced
-	// by the TokenReview API on each request.
 	session.SetExpiresOn(session.Clock.Now().Add(30 * time.Second))
 
 	return session, nil
+}
+
+func copySession(s *sessions.SessionState) *sessions.SessionState {
+	groups := make([]string, len(s.Groups))
+	copy(groups, s.Groups)
+	cp := *s
+	cp.Groups = groups
+	return &cp
 }
