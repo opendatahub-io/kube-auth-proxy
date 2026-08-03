@@ -57,6 +57,9 @@ var _ = Describe("Load", func() {
 			Templates:                templatesDefaults(),
 			SkipAuthPreflight:        false,
 			Logging:                  loggingDefaults(),
+			KubeAPIQPS:               50,
+			KubeAPIBurst:             100,
+			KubeAPICacheTTL:          10 * time.Second,
 		},
 	}
 
