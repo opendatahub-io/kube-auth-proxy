@@ -68,9 +68,9 @@ type Options struct {
 	AllowQuerySemicolons       bool     `flag:"allow-query-semicolons" cfg:"allow_query_semicolons"`
 
 	// Kubernetes service account token validation (independent of provider)
-	EnableK8sTokenValidation bool     `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
-	KubernetesAudiences      []string `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"` // Optional: when empty, uses default K8s API server issuer/audience
-	Kubeconfig               string   `flag:"kubeconfig" cfg:"kubeconfig"`
+	EnableK8sTokenValidation bool          `flag:"enable-k8s-token-validation" cfg:"enable_k8s_token_validation"`
+	KubernetesAudiences      []string      `flag:"kubernetes-audiences" cfg:"kubernetes_audiences"` // Optional: when empty, uses default K8s API server issuer/audience
+	Kubeconfig               string        `flag:"kubeconfig" cfg:"kubeconfig"`
 	KubeAPIQPS               float32       `flag:"kube-api-qps" cfg:"kube_api_qps"`
 	KubeAPIBurst             int           `flag:"kube-api-burst" cfg:"kube_api_burst"`
 	KubeAPICacheTTL          time.Duration `flag:"kube-api-cache-ttl" cfg:"kube_api_cache_ttl"`
