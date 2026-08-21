@@ -3,9 +3,13 @@ package k8s
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/sessions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -46,8 +50,24 @@ func (m *mockKubernetesClient) AuthenticationV1() authv1.AuthenticationV1Interfa
 	return m.authClient
 }
 
+func newTestValidator(mockFunc func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error), audiences []string) *TokenReviewValidator {
+	client := &mockKubernetesClient{
+		Interface: fake.NewSimpleClientset(),
+		authClient: &mockTokenReviewClient{
+			tokenReviewFunc: mockFunc,
+		},
+	}
+	return &TokenReviewValidator{
+		client:        client,
+		audiences:     audiences,
+		inflight:      make(map[string]*inflightCall),
+		cache:         make(map[string]*tokenCacheEntry),
+		cacheTTL:      defaultCacheTTL,
+		reviewTimeout: defaultReviewTimeout,
+	}
+}
+
 func TestTokenReviewValidator_ValidateToken_Success(t *testing.T) {
-	// Mock successful TokenReview response
 	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
 		return &authenticationv1.TokenReview{
 			Status: authenticationv1.TokenReviewStatus{
@@ -61,17 +81,7 @@ func TestTokenReviewValidator_ValidateToken_Success(t *testing.T) {
 		}, nil
 	}
 
-	client := &mockKubernetesClient{
-		Interface: fake.NewSimpleClientset(),
-		authClient: &mockTokenReviewClient{
-			tokenReviewFunc: mockFunc,
-		},
-	}
-
-	validator := &TokenReviewValidator{
-		client:    client,
-		audiences: []string{"test-audience"},
-	}
+	validator := newTestValidator(mockFunc, []string{"test-audience"})
 
 	session, err := validator.ValidateToken(context.Background(), "valid-token")
 
@@ -86,7 +96,6 @@ func TestTokenReviewValidator_ValidateToken_Success(t *testing.T) {
 }
 
 func TestTokenReviewValidator_ValidateToken_InvalidToken(t *testing.T) {
-	// Mock TokenReview response for invalid token
 	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
 		return &authenticationv1.TokenReview{
 			Status: authenticationv1.TokenReviewStatus{
@@ -96,17 +105,7 @@ func TestTokenReviewValidator_ValidateToken_InvalidToken(t *testing.T) {
 		}, nil
 	}
 
-	client := &mockKubernetesClient{
-		Interface: fake.NewSimpleClientset(),
-		authClient: &mockTokenReviewClient{
-			tokenReviewFunc: mockFunc,
-		},
-	}
-
-	validator := &TokenReviewValidator{
-		client:    client,
-		audiences: []string{"test-audience"},
-	}
+	validator := newTestValidator(mockFunc, []string{"test-audience"})
 
 	session, err := validator.ValidateToken(context.Background(), "invalid-token")
 
@@ -116,7 +115,6 @@ func TestTokenReviewValidator_ValidateToken_InvalidToken(t *testing.T) {
 }
 
 func TestTokenReviewValidator_ValidateToken_ExpiredToken(t *testing.T) {
-	// Mock TokenReview response for expired token
 	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
 		return &authenticationv1.TokenReview{
 			Status: authenticationv1.TokenReviewStatus{
@@ -126,17 +124,7 @@ func TestTokenReviewValidator_ValidateToken_ExpiredToken(t *testing.T) {
 		}, nil
 	}
 
-	client := &mockKubernetesClient{
-		Interface: fake.NewSimpleClientset(),
-		authClient: &mockTokenReviewClient{
-			tokenReviewFunc: mockFunc,
-		},
-	}
-
-	validator := &TokenReviewValidator{
-		client:    client,
-		audiences: []string{"test-audience"},
-	}
+	validator := newTestValidator(mockFunc, []string{"test-audience"})
 
 	session, err := validator.ValidateToken(context.Background(), "expired-token")
 
@@ -146,22 +134,11 @@ func TestTokenReviewValidator_ValidateToken_ExpiredToken(t *testing.T) {
 }
 
 func TestTokenReviewValidator_ValidateToken_APIError(t *testing.T) {
-	// Mock API error
 	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
 		return nil, errors.New("connection refused")
 	}
 
-	client := &mockKubernetesClient{
-		Interface: fake.NewSimpleClientset(),
-		authClient: &mockTokenReviewClient{
-			tokenReviewFunc: mockFunc,
-		},
-	}
-
-	validator := &TokenReviewValidator{
-		client:    client,
-		audiences: []string{"test-audience"},
-	}
+	validator := newTestValidator(mockFunc, []string{"test-audience"})
 
 	session, err := validator.ValidateToken(context.Background(), "any-token")
 
@@ -204,17 +181,7 @@ func TestTokenReviewValidator_ValidateToken_AudienceValidation(t *testing.T) {
 				}, nil
 			}
 
-			client := &mockKubernetesClient{
-				Interface: fake.NewSimpleClientset(),
-				authClient: &mockTokenReviewClient{
-					tokenReviewFunc: mockFunc,
-				},
-			}
-
-			validator := &TokenReviewValidator{
-				client:    client,
-				audiences: tt.validatorAudience,
-			}
+			validator := newTestValidator(mockFunc, tt.validatorAudience)
 
 			_, err := validator.ValidateToken(context.Background(), "test-token")
 
@@ -225,7 +192,6 @@ func TestTokenReviewValidator_ValidateToken_AudienceValidation(t *testing.T) {
 }
 
 func TestTokenReviewValidator_ValidateToken_SessionFields(t *testing.T) {
-	// Test that all session fields are populated correctly
 	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
 		return &authenticationv1.TokenReview{
 			Status: authenticationv1.TokenReviewStatus{
@@ -239,24 +205,13 @@ func TestTokenReviewValidator_ValidateToken_SessionFields(t *testing.T) {
 		}, nil
 	}
 
-	client := &mockKubernetesClient{
-		Interface: fake.NewSimpleClientset(),
-		authClient: &mockTokenReviewClient{
-			tokenReviewFunc: mockFunc,
-		},
-	}
-
-	validator := &TokenReviewValidator{
-		client:    client,
-		audiences: []string{"test-aud"},
-	}
+	validator := newTestValidator(mockFunc, []string{"test-aud"})
 
 	session, err := validator.ValidateToken(context.Background(), "my-token")
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
 
-	// Verify all fields
 	assert.Equal(t, "system:serviceaccount:my-namespace:my-sa", session.User)
 	assert.Equal(t, "system:serviceaccount:my-namespace:my-sa@cluster.local", session.Email)
 	assert.Equal(t, "my-token", session.AccessToken)
@@ -265,8 +220,289 @@ func TestTokenReviewValidator_ValidateToken_SessionFields(t *testing.T) {
 	assert.Contains(t, session.Groups, "group2")
 	assert.Contains(t, session.Groups, "system:authenticated")
 
-	// Verify timestamps
 	assert.False(t, session.CreatedAt.IsZero())
 	assert.True(t, session.ExpiresOn.After(time.Now()))
 	assert.True(t, session.ExpiresOn.Before(time.Now().Add(25*time.Hour)))
+}
+
+func TestTokenReviewValidator_Singleflight(t *testing.T) {
+	var apiCalls atomic.Int32
+	gate := make(chan struct{})
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		<-gate
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	const concurrency = 10
+	var wg sync.WaitGroup
+	results := make([]*sessions.SessionState, concurrency)
+	errs := make([]error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = validator.ValidateToken(context.Background(), "same-token")
+		}(i)
+	}
+
+	// Let all goroutines start and block on the gate
+	time.Sleep(50 * time.Millisecond)
+	close(gate)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), apiCalls.Load(), "singleflight should deduplicate concurrent calls to 1 API call")
+
+	for i := 0; i < concurrency; i++ {
+		require.NoError(t, errs[i])
+		assert.Equal(t, "system:serviceaccount:ns:sa", results[i].User)
+	}
+}
+
+func TestTokenReviewValidator_Cache(t *testing.T) {
+	var apiCalls atomic.Int32
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+	validator.cacheTTL = 1 * time.Second
+
+	// First call hits the API
+	s1, err := validator.ValidateToken(context.Background(), "cached-token")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), apiCalls.Load())
+
+	// Second call should come from cache
+	s2, err := validator.ValidateToken(context.Background(), "cached-token")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), apiCalls.Load(), "second call should be served from cache")
+	assert.Equal(t, s1.User, s2.User)
+
+	// Wait for cache to expire
+	time.Sleep(1100 * time.Millisecond)
+
+	// Third call should hit the API again
+	_, err = validator.ValidateToken(context.Background(), "cached-token")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), apiCalls.Load(), "call after TTL expiry should hit the API")
+}
+
+func TestTokenReviewValidator_CacheNotUsedForErrors(t *testing.T) {
+	var apiCalls atomic.Int32
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: false,
+				Error:         "invalid token",
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	_, err := validator.ValidateToken(context.Background(), "bad-token")
+	assert.Error(t, err)
+	assert.Equal(t, int32(1), apiCalls.Load())
+
+	// Failed validations should not be cached
+	_, err = validator.ValidateToken(context.Background(), "bad-token")
+	assert.Error(t, err)
+	assert.Equal(t, int32(2), apiCalls.Load(), "failed validations should not be cached")
+}
+
+func TestTokenReviewValidator_DifferentTokensNotDeduplicated(t *testing.T) {
+	var apiCalls atomic.Int32
+	gate := make(chan struct{})
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		<-gate
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			token := fmt.Sprintf("token-%d", idx)
+			_, _ = validator.ValidateToken(context.Background(), token)
+		}(i)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(gate)
+	wg.Wait()
+
+	assert.Equal(t, int32(3), apiCalls.Load(), "different tokens should each produce a separate API call")
+}
+
+func TestTokenReviewValidator_FollowerSurvivesLeaderCancel(t *testing.T) {
+	gate := make(chan struct{})
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		<-gate
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	leaderCtx, leaderCancel := context.WithCancel(context.Background())
+	followerCtx := context.Background()
+
+	var wg sync.WaitGroup
+	var leaderErr, followerErr error
+	var followerSession *sessions.SessionState
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, leaderErr = validator.ValidateToken(leaderCtx, "shared-token")
+	}()
+	go func() {
+		defer wg.Done()
+		time.Sleep(10 * time.Millisecond)
+		followerSession, followerErr = validator.ValidateToken(followerCtx, "shared-token")
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	leaderCancel()
+	time.Sleep(10 * time.Millisecond)
+	close(gate)
+	wg.Wait()
+
+	assert.Error(t, leaderErr, "leader should get context canceled error")
+	require.NoError(t, followerErr, "follower should succeed even after leader cancels")
+	assert.Equal(t, "system:serviceaccount:ns:sa", followerSession.User)
+}
+
+func TestTokenReviewValidator_CacheEvictsExpired(t *testing.T) {
+	var apiCalls atomic.Int32
+
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		apiCalls.Add(1)
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+	validator.cacheTTL = 50 * time.Millisecond
+
+	_, err := validator.ValidateToken(context.Background(), "token-a")
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	_, err = validator.ValidateToken(context.Background(), "token-b")
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+	validator.cacheMu.RLock()
+	cacheLen := len(validator.cache)
+	validator.cacheMu.RUnlock()
+
+	assert.Equal(t, 1, cacheLen, "expired entry for token-a should have been evicted when token-b was cached")
+}
+
+func TestTokenReviewValidator_SessionTimeCopyIsolation(t *testing.T) {
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"system:authenticated"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	s1, err := validator.ValidateToken(context.Background(), "time-test-token")
+	require.NoError(t, err)
+
+	originalExpiry := *s1.ExpiresOn
+	*s1.ExpiresOn = s1.ExpiresOn.Add(1 * time.Hour)
+
+	s2, err := validator.ValidateToken(context.Background(), "time-test-token")
+	require.NoError(t, err)
+	assert.Equal(t, originalExpiry, *s2.ExpiresOn, "cached session ExpiresOn should not be affected by mutations to previously returned copies")
+}
+
+func TestTokenReviewValidator_SessionCopyIsolation(t *testing.T) {
+	mockFunc := func(ctx context.Context, tr *authenticationv1.TokenReview, opts metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+		return &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: true,
+				User: authenticationv1.UserInfo{
+					Username: "system:serviceaccount:ns:sa",
+					Groups:   []string{"group1", "group2"},
+				},
+			},
+		}, nil
+	}
+
+	validator := newTestValidator(mockFunc, nil)
+
+	s1, err := validator.ValidateToken(context.Background(), "isolation-token")
+	require.NoError(t, err)
+
+	// Mutate the returned session's groups
+	s1.Groups = append(s1.Groups, "injected-group")
+
+	// Second call should return an unmodified copy from cache
+	s2, err := validator.ValidateToken(context.Background(), "isolation-token")
+	require.NoError(t, err)
+	assert.Len(t, s2.Groups, 2, "cached session should not be affected by mutations to previously returned copies")
 }

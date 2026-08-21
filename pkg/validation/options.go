@@ -46,6 +46,15 @@ func Validate(o *options.Options) error {
 		}
 	}
 
+	if o.EnableK8sTokenValidation {
+		if o.KubeAPIQPS < 1 {
+			msgs = append(msgs, "kube-api-qps must be >= 1 when K8s token validation is enabled")
+		}
+		if o.KubeAPIBurst < 1 {
+			msgs = append(msgs, "kube-api-burst must be >= 1 when K8s token validation is enabled")
+		}
+	}
+
 	if o.AuthenticatedEmailsFile == "" && len(o.EmailDomains) == 0 && o.HtpasswdFile == "" {
 		msgs = append(msgs, "missing setting for email validation: email-domain or authenticated-emails-file required."+
 			"\n      use email-domain=* to authorize all email addresses")
