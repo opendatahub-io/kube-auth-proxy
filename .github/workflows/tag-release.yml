@@ -57,25 +57,37 @@ jobs:
         REPO: ${{ github.repository }}
       run: |
         SHA=$(git rev-parse HEAD)
+        KONFLUX_CHECK="Red Hat Konflux / kube-auth-proxy-on-push"
         echo "Waiting for Konflux check on commit ${SHA}..."
 
-        for i in $(seq 1 60); do
-          STATUS=$(gh api repos/${REPO}/commits/${SHA}/check-runs \
-            --jq '.check_runs[] | select(.name == "Red Hat Konflux / kube-auth-proxy-on-push") | .conclusion' 2>/dev/null || echo "")
+        KONFLUX_URL=""
+        for i in $(seq 1 120); do
+          RESULT=$(gh api repos/${REPO}/commits/${SHA}/check-runs \
+            --jq ".check_runs[] | select(.name == \"${KONFLUX_CHECK}\") | {conclusion, details_url}" 2>/dev/null || echo "")
 
-          if [ "$STATUS" = "success" ]; then
-            echo "Konflux build passed"
-            exit 0
-          elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
-            echo "::error::Konflux build failed with status: ${STATUS}"
-            exit 1
+          if [ -n "$RESULT" ]; then
+            STATUS=$(echo "$RESULT" | jq -r '.conclusion // empty')
+            if [ -z "$KONFLUX_URL" ]; then
+              KONFLUX_URL=$(echo "$RESULT" | jq -r '.details_url // empty')
+              if [ -n "$KONFLUX_URL" ]; then
+                echo "::notice::Konflux pipeline: ${KONFLUX_URL}"
+              fi
+            fi
+
+            if [ "$STATUS" = "success" ]; then
+              echo "Konflux build passed"
+              exit 0
+            elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
+              echo "::error::Konflux build failed (status: ${STATUS}). See: ${KONFLUX_URL}"
+              exit 1
+            fi
           fi
 
-          echo "Attempt ${i}/60: Konflux build still running, waiting 30s..."
+          echo "Attempt ${i}/120: Konflux build still running, waiting 30s..."
           sleep 30
         done
 
-        echo "::error::Timed out waiting for Konflux build (30 minutes)"
+        echo "::error::Timed out waiting for Konflux build (60 minutes)"
         exit 1
 
     - name: Detect previous tag
