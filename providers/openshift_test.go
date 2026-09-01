@@ -190,6 +190,54 @@ func TestOpenShiftProviderRedeemMissingCode(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing code")
 }
 
+func TestCaPathsForOpenShiftClient(t *testing.T) {
+	tests := []struct {
+		name     string
+		caFiles  []string
+		expected []string
+	}{
+		{
+			name:     "no provider CA files falls back to the serviceaccount CA",
+			caFiles:  nil,
+			expected: []string{serviceAccountCAPath},
+		},
+		{
+			name:     "empty provider CA files falls back to the serviceaccount CA",
+			caFiles:  []string{},
+			expected: []string{serviceAccountCAPath},
+		},
+		{
+			name:     "provider CA is appended to, not a replacement for, the serviceaccount CA",
+			caFiles:  []string{"/etc/provider-ca/ca.crt"},
+			expected: []string{"/etc/provider-ca/ca.crt", serviceAccountCAPath},
+		},
+		{
+			name:     "multiple provider CAs keep the serviceaccount CA at the end",
+			caFiles:  []string{"/custom/ca1.crt", "/custom/ca2.crt"},
+			expected: []string{"/custom/ca1.crt", "/custom/ca2.crt", serviceAccountCAPath},
+		},
+		{
+			name:     "does not duplicate the serviceaccount CA if it is already listed",
+			caFiles:  []string{serviceAccountCAPath, "/etc/provider-ca/ca.crt"},
+			expected: []string{serviceAccountCAPath, "/etc/provider-ca/ca.crt"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := caPathsForOpenShiftClient(tt.caFiles)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+
+	t.Run("does not mutate the caller's CAFiles slice", func(t *testing.T) {
+		caFiles := []string{"/etc/provider-ca/ca.crt"}
+		got := caPathsForOpenShiftClient(caFiles)
+		assert.Equal(t, []string{"/etc/provider-ca/ca.crt", serviceAccountCAPath}, got)
+		assert.Equal(t, []string{"/etc/provider-ca/ca.crt"}, caFiles)
+	})
+}
+
 func TestOpenShiftProviderCacheKeyFormat(t *testing.T) {
 	tests := []struct {
 		name                string
