@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/ghodss/yaml"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/authentication/k8s"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
+	tlsprofile "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/tls"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/validation"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/version"
 	"github.com/spf13/pflag"
@@ -78,12 +82,34 @@ func main() {
 		}
 	}
 
-	oauthproxy, err := NewOAuthProxy(opts, validator, k8sTokenValidator)
+	tlsResult, profileWatcher, err := tlsprofile.Resolve(context.Background(), opts.Kubeconfig)
+	if err != nil {
+		logger.Fatalf("ERROR: Failed to resolve cluster TLS profile: %v", err)
+	}
+
+	oauthproxy, err := NewOAuthProxyWithTLS(opts, validator, k8sTokenValidator, tlsResult.TLSOpts)
 	if err != nil {
 		logger.Fatalf("ERROR: Failed to initialise OAuth2 Proxy: %v", err)
 	}
 
-	if err := oauthproxy.Start(); err != nil {
+	proxyCtx, cancel := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer cancel()
+	if profileWatcher != nil {
+		go func() {
+			if err := profileWatcher.Run(proxyCtx, func() {
+				logger.Printf("TLS profile or adherence changed; restarting proxy")
+				cancel()
+			}); err != nil {
+				logger.Fatalf("ERROR: TLS profile watcher failed: %v", err)
+			}
+		}()
+	}
+
+	if err := oauthproxy.StartContext(proxyCtx); err != nil {
 		logger.Fatalf("ERROR: Failed to start OAuth2 Proxy: %v", err)
 	}
 }

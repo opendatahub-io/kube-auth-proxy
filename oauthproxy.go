@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -120,6 +121,7 @@ type OAuthProxy struct {
 	pageWriter        pagewriter.Writer
 	server            proxyhttp.Server
 	upstreamProxy     http.Handler
+	tlsOpts           []func(*tls.Config)
 	serveMux          *mux.Router
 	redirectValidator redirect.Validator
 	appDirector       redirect.AppDirector
@@ -144,6 +146,15 @@ func (p *OAuthProxy) handleAuthDenied(rw http.ResponseWriter, req *http.Request,
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
 func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenValidator k8s.Validator) (*OAuthProxy, error) {
+	return newOAuthProxy(opts, validator, k8sTokenValidator, nil)
+}
+
+// NewOAuthProxyWithTLS creates an OAuthProxy with centrally resolved TLS options.
+func NewOAuthProxyWithTLS(opts *options.Options, validator func(string) bool, k8sTokenValidator k8s.Validator, tlsOpts []func(*tls.Config)) (*OAuthProxy, error) {
+	return newOAuthProxy(opts, validator, k8sTokenValidator, tlsOpts)
+}
+
+func newOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenValidator k8s.Validator, tlsOpts []func(*tls.Config)) (*OAuthProxy, error) {
 	sessionStore, err := sessions.NewSessionStore(&opts.Session, &opts.Cookie)
 	if err != nil {
 		return nil, fmt.Errorf("error initialising session store: %v", err)
@@ -274,6 +285,7 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenV
 		preAuthChain:       preAuthChain,
 		pageWriter:         pageWriter,
 		upstreamProxy:      upstreamProxy,
+		tlsOpts:            tlsOpts,
 		redirectValidator:  redirectValidator,
 		appDirector:        appDirector,
 		encodeState:        opts.EncodeState,
@@ -288,21 +300,27 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool, k8sTokenV
 }
 
 func (p *OAuthProxy) Start() error {
-	if p.server == nil {
-		// We have to call setupServer before Start is called.
-		// If this doesn't happen it's a programming error.
-		panic("server has not been initialised")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Observe signals in background goroutine.
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
 		<-sigint
-		cancel() // cancel the context
+		cancel()
 	}()
+
+	return p.StartContext(ctx)
+}
+
+// StartContext starts the proxy with the supplied lifecycle context.
+func (p *OAuthProxy) StartContext(ctx context.Context) error {
+	if p.server == nil {
+		// We have to call setupServer before Start is called.
+		// If this doesn't happen it's a programming error.
+		panic("server has not been initialised")
+	}
 
 	return p.server.Start(ctx)
 }
@@ -313,6 +331,7 @@ func (p *OAuthProxy) setupServer(opts *options.Options) error {
 		BindAddress:       opts.Server.BindAddress,
 		SecureBindAddress: opts.Server.SecureBindAddress,
 		TLS:               opts.Server.TLS,
+		TLSOpts:           p.tlsOpts,
 	}
 
 	// Option: AllowQuerySemicolons
@@ -330,6 +349,7 @@ func (p *OAuthProxy) setupServer(opts *options.Options) error {
 		BindAddress:       opts.MetricsServer.BindAddress,
 		SecureBindAddress: opts.MetricsServer.SecureBindAddress,
 		TLS:               opts.MetricsServer.TLS,
+		TLSOpts:           p.tlsOpts,
 	})
 	if err != nil {
 		return fmt.Errorf("could not build metrics server: %v", err)

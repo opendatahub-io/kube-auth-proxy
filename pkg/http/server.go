@@ -43,6 +43,9 @@ type Opts struct {
 	// TLS is the TLS configuration for the server.
 	TLS *options.TLS
 
+	// TLSOpts applies centrally resolved TLS settings after local options.
+	TLSOpts []func(*tls.Config)
+
 	// Let testing infrastructure circumvent parsing file descriptors
 	fdFiles []*os.File
 }
@@ -169,6 +172,10 @@ func (s *server) setupTLSListener(opts Opts) error {
 		default:
 			return errors.New("unknown TLS MinVersion config provided")
 		}
+	}
+
+	for _, tlsOpt := range opts.TLSOpts {
+		tlsOpt(config)
 	}
 
 	listenAddr := getListenAddress(opts.SecureBindAddress)

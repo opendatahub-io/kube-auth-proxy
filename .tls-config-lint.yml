@@ -1,0 +1,5 @@
+# These findings are intentional only in the centralized profile resolver.
+# Keep the exceptions scoped to that file so the checks remain active elsewhere.
+exceptions:
+  - tls-profile-old:pkg/tls/profile.go
+  - tls-profile-custom:pkg/tls/profile.go
