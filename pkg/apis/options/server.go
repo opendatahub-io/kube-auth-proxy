@@ -32,7 +32,7 @@ type TLS struct {
 
 	// CipherSuites is a list of TLS cipher suites that are allowed.
 	// E.g.:
-	// - TLS_RSA_WITH_RC4_128_SHA
+	// - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 	// - TLS_RSA_WITH_AES_256_GCM_SHA384
 	// If not specified, the default Go safe cipher list is used.
 	// List of valid cipher suites can be found in the [crypto/tls documentation](https://pkg.go.dev/crypto/tls#pkg-constants).
