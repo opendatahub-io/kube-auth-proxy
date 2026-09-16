@@ -32,7 +32,7 @@ func Validate(o *options.Options) error {
 
 	if o.SSLInsecureSkipVerify {
 		transport := requests.DefaultTransport.(*http.Transport)
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- InsecureSkipVerify is a configurable option we allow
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- InsecureSkipVerify is a configurable option we allow; tls-lint:ignore:insecure-skip-verify
 	} else if len(o.Providers[0].CAFiles) > 0 {
 		pool, err := util.GetCertPool(o.Providers[0].CAFiles, o.Providers[0].UseSystemTrustStore)
 		if err == nil {

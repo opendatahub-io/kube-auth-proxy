@@ -453,8 +453,6 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 			Proxy: http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{
 				RootCAs: pool,
-				// Use strong security settings
-				MinVersion: tls.VersionTLS12,
 				// #nosec G402 -- InsecureSkipVerify is a configurable option we allow (from --ssl-insecure-skip-verify)
 				InsecureSkipVerify: insecureSkipVerify,
 			},
