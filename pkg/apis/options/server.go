@@ -37,4 +37,8 @@ type TLS struct {
 	// If not specified, the default Go safe cipher list is used.
 	// List of valid cipher suites can be found in the [crypto/tls documentation](https://pkg.go.dev/crypto/tls#pkg-constants).
 	CipherSuites []string
+
+	// CurvePreferences is the set of TLS key exchange groups that are allowed.
+	// The order is ignored by crypto/tls. If empty, Go defaults are used.
+	CurvePreferences []string
 }

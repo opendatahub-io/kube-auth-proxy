@@ -400,6 +400,7 @@ as well as an optional minimal TLS version that is acceptable.
 | `Cert` | _[SecretSource](#secretsource)_ | Cert is the TLS certificate data to use.<br/>Typically this will come from a file. |
 | `MinVersion` | _string_ | MinVersion is the minimal TLS version that is acceptable.<br/>E.g. Set to "TLS1.3" to select TLS version 1.3 |
 | `CipherSuites` | _[]string_ | CipherSuites is a list of TLS cipher suites that are allowed.<br/>E.g.:<br/>- TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256<br/>- TLS_RSA_WITH_AES_256_GCM_SHA384<br/>If not specified, the default Go safe cipher list is used.<br/>List of valid cipher suites can be found in the [crypto/tls documentation](https://pkg.go.dev/crypto/tls#pkg-constants). |
+| `CurvePreferences` | _[]string_ | CurvePreferences is the set of TLS key exchange groups that are allowed.<br/>The order is ignored by crypto/tls. If empty, Go defaults are used. |
 
 ### URLParameterRule
 

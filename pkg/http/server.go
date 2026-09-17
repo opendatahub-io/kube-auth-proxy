@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	curvetls "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/tls"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/apis/options"
@@ -73,6 +74,7 @@ type server struct {
 
 	listener    net.Listener
 	tlsListener net.Listener
+	tlsConfig   *tls.Config
 
 	// ensure activation.Files are called once
 	fdFiles []*os.File
@@ -159,6 +161,11 @@ func (s *server) setupTLSListener(opts Opts) error {
 		}
 		config.CipherSuites = cipherSuites
 	}
+	curvePreferences, err := curvetls.ParseCurvePreferences(opts.TLS.CurvePreferences)
+	if err != nil {
+		return fmt.Errorf("could not parse TLS curve preferences: %v", err)
+	}
+	config.CurvePreferences = curvePreferences
 
 	if len(opts.TLS.MinVersion) > 0 {
 		switch opts.TLS.MinVersion {
@@ -179,6 +186,7 @@ func (s *server) setupTLSListener(opts Opts) error {
 	}
 
 	s.tlsListener = tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, config)
+	s.tlsConfig = config
 	return nil
 }
 

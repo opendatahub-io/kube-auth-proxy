@@ -463,16 +463,20 @@ func getXAuthRequestAccessTokenHeader() Header {
 }
 
 type LegacyServer struct {
-	MetricsAddress       string   `flag:"metrics-address" cfg:"metrics_address"`
-	MetricsSecureAddress string   `flag:"metrics-secure-address" cfg:"metrics_secure_address"`
-	MetricsTLSCertFile   string   `flag:"metrics-tls-cert-file" cfg:"metrics_tls_cert_file"`
-	MetricsTLSKeyFile    string   `flag:"metrics-tls-key-file" cfg:"metrics_tls_key_file"`
-	HTTPAddress          string   `flag:"http-address" cfg:"http_address"`
-	HTTPSAddress         string   `flag:"https-address" cfg:"https_address"`
-	TLSCertFile          string   `flag:"tls-cert-file" cfg:"tls_cert_file"`
-	TLSKeyFile           string   `flag:"tls-key-file" cfg:"tls_key_file"`
-	TLSMinVersion        string   `flag:"tls-min-version" cfg:"tls_min_version"`
-	TLSCipherSuites      []string `flag:"tls-cipher-suite" cfg:"tls_cipher_suites"`
+	MetricsAddress             string   `flag:"metrics-address" cfg:"metrics_address"`
+	MetricsSecureAddress       string   `flag:"metrics-secure-address" cfg:"metrics_secure_address"`
+	MetricsTLSCertFile         string   `flag:"metrics-tls-cert-file" cfg:"metrics_tls_cert_file"`
+	MetricsTLSKeyFile          string   `flag:"metrics-tls-key-file" cfg:"metrics_tls_key_file"`
+	HTTPAddress                string   `flag:"http-address" cfg:"http_address"`
+	HTTPSAddress               string   `flag:"https-address" cfg:"https_address"`
+	TLSCertFile                string   `flag:"tls-cert-file" cfg:"tls_cert_file"`
+	TLSKeyFile                 string   `flag:"tls-key-file" cfg:"tls_key_file"`
+	TLSMinVersion              string   `flag:"tls-min-version" cfg:"tls_min_version"`
+	TLSCipherSuites            []string `flag:"tls-cipher-suite" cfg:"tls_cipher_suites"`
+	TLSCurvePreferences        []string `flag:"tls-curve-preferences" cfg:"tls_curve_preferences"`
+	MetricsTLSMinVersion       string   `flag:"metrics-tls-min-version" cfg:"metrics_tls_min_version"`
+	MetricsTLSCipherSuites     []string `flag:"metrics-tls-cipher-suite" cfg:"metrics_tls_cipher_suites"`
+	MetricsTLSCurvePreferences []string `flag:"metrics-tls-curve-preferences" cfg:"metrics_tls_curve_preferences"`
 }
 
 func legacyServerFlagset() *pflag.FlagSet {
@@ -488,6 +492,10 @@ func legacyServerFlagset() *pflag.FlagSet {
 	flagSet.String("tls-key-file", "", "path to private key file")
 	flagSet.String("tls-min-version", "", "minimal TLS version for HTTPS clients (either \"TLS1.2\" or \"TLS1.3\")")
 	flagSet.StringSlice("tls-cipher-suite", []string{}, "restricts TLS cipher suites to those listed (e.g. TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) (may be given multiple times)")
+	flagSet.StringSlice("tls-curve-preferences", []string{}, "restricts TLS key exchange groups to numeric Go crypto/tls CurveID values")
+	flagSet.String("metrics-tls-min-version", "", "minimum TLS version for the secure metrics server")
+	flagSet.StringSlice("metrics-tls-cipher-suite", []string{}, "TLS cipher suites for the secure metrics server")
+	flagSet.StringSlice("metrics-tls-curve-preferences", []string{}, "TLS key exchange groups for the secure metrics server as numeric Go crypto/tls CurveID values")
 
 	return flagSet
 }
@@ -613,6 +621,7 @@ func (l LegacyServer) convert() (Server, Server) {
 		if len(l.TLSCipherSuites) != 0 {
 			appServer.TLS.CipherSuites = l.TLSCipherSuites
 		}
+		appServer.TLS.CurvePreferences = l.TLSCurvePreferences
 		// Preserve backwards compatibility, only run one server
 		appServer.BindAddress = ""
 	} else {
@@ -633,7 +642,10 @@ func (l LegacyServer) convert() (Server, Server) {
 			Cert: &SecretSource{
 				FromFile: l.MetricsTLSCertFile,
 			},
+			MinVersion: l.MetricsTLSMinVersion,
 		}
+		metricsServer.TLS.CipherSuites = l.MetricsTLSCipherSuites
+		metricsServer.TLS.CurvePreferences = l.MetricsTLSCurvePreferences
 	}
 
 	return appServer, metricsServer
