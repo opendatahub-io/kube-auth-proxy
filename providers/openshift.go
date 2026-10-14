@@ -3,8 +3,10 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,9 +56,13 @@ type OpenShiftProvider struct {
 	// to the OpenShift OAuth server and API endpoints
 	CAFiles []string
 
-	// httpClientCache caches HTTP clients by CA configuration to avoid
-	// recreating clients when CA certificates haven't changed
-	httpClientCache sync.Map
+	// clientMu guards the single-slot HTTP client cache below. The slot holds
+	// the client for the most recent CA configuration; a superseded client is
+	// evicted with its idle connections closed, so repeated CA rotations
+	// cannot grow memory without bound.
+	clientMu     sync.Mutex
+	cachedClient *http.Client
+	cachedCAKey  string
 
 	// discoveryMu guards the check-then-act on LoginURL/RedeemURL during
 	// on-demand OAuth endpoint discovery, preventing concurrent goroutines
@@ -402,8 +408,40 @@ func (p *OpenShiftProvider) ValidateSession(ctx context.Context, s *sessions.Ses
 	return false
 }
 
+// caConfigCacheKey hashes the CA file paths together with their contents so
+// the HTTP client cache invalidates when a mounted secret rotates the CA under
+// the same path. Mirrors the operator's rollout-hash convention (\x00
+// separators). The contents are read once by the caller so the cache key and
+// the certificate pool are always derived from the same snapshot. An
+// unreadable or empty file contributes a marker instead of content, so the
+// degraded configuration gets its own key and can never collide with (or
+// shadow) a key computed from real contents.
+func caConfigCacheKey(caPaths []string, caContents [][]byte) string {
+	h := sha256.New()
+	for i, path := range caPaths {
+		h.Write([]byte(path))
+		h.Write([]byte{0})
+		if len(caContents[i]) == 0 {
+			h.Write([]byte{1}) // marker: file unreadable or empty
+		} else {
+			h.Write([]byte{2})
+			h.Write(caContents[i])
+		}
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // newOpenShiftClient returns a client for connecting to the OpenShift OAuth server
 func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
+	// The whole snapshot-read-check-commit sequence is serialized: reading the
+	// CA files before taking the lock would let a call holding a pre-rotation
+	// snapshot overwrite a client already committed for rotated contents.
+	// The locked work is a few page-cached reads plus hashing, negligible
+	// against the TLS round trip every caller performs afterwards.
+	p.clientMu.Lock()
+	defer p.clientMu.Unlock()
+
 	capaths := p.CAFiles
 	if len(capaths) == 0 {
 		capaths = []string{serviceAccountCAPath}
@@ -416,11 +454,32 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 		insecureSkipVerify = defaultTransport.TLSClientConfig.InsecureSkipVerify
 	}
 
-	// Simple cache key based on CA paths, system trust store, and insecure skip verify settings
-	cacheKey := fmt.Sprintf("%t:%t:%s", p.useSystemTrustStore, insecureSkipVerify, strings.Join(capaths, ","))
+	// Read the CA files once so the cache key and the certificate pool are
+	// derived from the same snapshot: reading them separately could file a
+	// pool built from new bytes under a key computed from the old ones if a
+	// secret rotates between the two reads. An unreadable or empty file keeps
+	// the existing fallback behavior (client without that CA); its marker in
+	// the cache key means the fallback is cached and reused while the file is
+	// unavailable, and the next successful read switches to the content key.
+	caContents := make([][]byte, len(capaths))
+	for i, caPath := range capaths {
+		data, err := os.ReadFile(caPath)
+		if err != nil {
+			logger.Errorf("could not load CA file %s: %v", caPath, err)
+		} else if len(data) == 0 {
+			logger.Errorf("CA file %s is empty", caPath)
+		}
+		caContents[i] = data
+	}
 
-	if httpClient, ok := p.httpClientCache.Load(cacheKey); ok {
-		return httpClient.(*http.Client), nil
+	// Cache key based on CA paths and contents, system trust store, and insecure
+	// skip verify settings. Contents are hashed, not just paths, so that rotating
+	// a CA behind a mounted secret file (same path, new bytes) builds a new client
+	// instead of trusting the stale in-memory pool.
+	cacheKey := fmt.Sprintf("%t:%t:%s", p.useSystemTrustStore, insecureSkipVerify, caConfigCacheKey(capaths, caContents))
+
+	if p.cachedClient != nil && p.cachedCAKey == cacheKey {
+		return p.cachedClient, nil
 	}
 
 	// Create certificate pool
@@ -437,14 +496,13 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 		pool = x509.NewCertPool()
 	}
 
-	// Add custom CA certificates
-	for _, caPath := range capaths {
-		if caPEM, err := os.ReadFile(caPath); err == nil {
-			if ok := pool.AppendCertsFromPEM(caPEM); !ok {
-				logger.Errorf("no certs appended from CA file %s", caPath)
-			}
-		} else {
-			logger.Errorf("could not load CA file %s: %v", caPath, err)
+	// Add custom CA certificates from the snapshot read above
+	for i, caPath := range capaths {
+		if len(caContents[i]) == 0 {
+			continue // read failure already logged above
+		}
+		if ok := pool.AppendCertsFromPEM(caContents[i]); !ok {
+			logger.Errorf("no certs appended from CA file %s", caPath)
 		}
 	}
 
@@ -456,10 +514,22 @@ func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
 				// #nosec G402 -- InsecureSkipVerify is a configurable option we allow (from --ssl-insecure-skip-verify)
 				InsecureSkipVerify: insecureSkipVerify,
 			},
+			IdleConnTimeout: 90 * time.Second,
 		},
 		Timeout: 1 * time.Minute,
 	}
-	p.httpClientCache.Store(cacheKey, httpClient)
+
+	// Evict the superseded client so the cache holds exactly one entry and
+	// repeated CA rotations cannot accumulate transports. Closing idle
+	// connections releases the old client's pooled connections; in-flight
+	// requests are unaffected.
+	if p.cachedClient != nil {
+		if tr, ok := p.cachedClient.Transport.(*http.Transport); ok {
+			tr.CloseIdleConnections()
+		}
+	}
+	p.cachedClient = httpClient
+	p.cachedCAKey = cacheKey
 
 	return httpClient, nil
 }

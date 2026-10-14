@@ -9,6 +9,7 @@
 ## Changes since v7.11.0
 
 - Upgraded Go toolchain from 1.25.3 to 1.26
+- Fixed stale CA trust pool in the OpenShift provider: the HTTP client cache now keys on CA file contents, so rotating a CA behind a mounted secret file is picked up without a process restart
 
 # V7.11.0
 
