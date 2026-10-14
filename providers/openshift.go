@@ -402,12 +402,31 @@ func (p *OpenShiftProvider) ValidateSession(ctx context.Context, s *sessions.Ses
 	return false
 }
 
+// caPathsForOpenShiftClient returns the CA files used to verify TLS to both
+// the Kubernetes API and the OpenShift OAuth server.
+//
+// --provider-ca-file must add CAs, not replace the serviceaccount CA. The same
+// HTTP client talks to the API (discovery, userinfo) and to the OAuth route,
+// so dropping the API CA breaks login with "certificate signed by unknown
+// authority" against KUBERNETES_SERVICE_HOST.
+func caPathsForOpenShiftClient(caFiles []string) []string {
+	if len(caFiles) == 0 {
+		return []string{serviceAccountCAPath}
+	}
+	for _, p := range caFiles {
+		if p == serviceAccountCAPath {
+			return caFiles
+		}
+	}
+	out := make([]string, len(caFiles)+1)
+	copy(out, caFiles)
+	out[len(caFiles)] = serviceAccountCAPath
+	return out
+}
+
 // newOpenShiftClient returns a client for connecting to the OpenShift OAuth server
 func (p *OpenShiftProvider) newOpenShiftClient() (*http.Client, error) {
-	capaths := p.CAFiles
-	if len(capaths) == 0 {
-		capaths = []string{serviceAccountCAPath}
-	}
+	capaths := caPathsForOpenShiftClient(p.CAFiles)
 
 	// Check if DefaultTransport has InsecureSkipVerify set (from --ssl-insecure-skip-verify flag)
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
