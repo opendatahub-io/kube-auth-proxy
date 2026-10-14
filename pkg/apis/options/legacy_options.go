@@ -490,7 +490,7 @@ func legacyServerFlagset() *pflag.FlagSet {
 	flagSet.String("https-address", ":443", "<addr>:<port> to listen on for HTTPS clients")
 	flagSet.String("tls-cert-file", "", "path to certificate file")
 	flagSet.String("tls-key-file", "", "path to private key file")
-	flagSet.String("tls-min-version", "", "minimal TLS version for HTTPS clients (either \"TLS1.2\" or \"TLS1.3\")")
+	flagSet.String("tls-min-version", "", "minimal TLS version for HTTPS clients (\"VersionTLS10\" through \"VersionTLS13\" or \"TLS1.0\" through \"TLS1.3\")")
 	flagSet.StringSlice("tls-cipher-suite", []string{}, "restricts TLS cipher suites to those listed (e.g. TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) (may be given multiple times)")
 	flagSet.StringSlice("tls-curve-preferences", []string{}, "restricts TLS key exchange groups to numeric Go crypto/tls CurveID values")
 	flagSet.String("metrics-tls-min-version", "", "minimum TLS version for the secure metrics server")

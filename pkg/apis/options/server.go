@@ -27,7 +27,7 @@ type TLS struct {
 	Cert *SecretSource
 
 	// MinVersion is the minimal TLS version that is acceptable.
-	// E.g. Set to "TLS1.3" to select TLS version 1.3
+	// E.g. Set to "TLS1.3" or "VersionTLS13" to select TLS version 1.3
 	MinVersion string
 
 	// CipherSuites is a list of TLS cipher suites that are allowed.

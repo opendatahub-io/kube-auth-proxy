@@ -19,11 +19,6 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 )
 
-const (
-	tlsVersion12 = "TLS1.2"
-	tlsVersion13 = "TLS1.3"
-)
-
 // Server represents an HTTP or HTTPS server.
 type Server interface {
 	// Start blocks and runs the server.
@@ -111,6 +106,41 @@ func (s *server) setupListener(opts Opts) error {
 	return nil
 }
 
+// Accepted flag values for the minimum TLS version: the Go version names
+// used by kube-rbac-proxy and the short-form names.
+const (
+	goTLSVersion10    = "VersionTLS10"
+	goTLSVersion11    = "VersionTLS11"
+	goTLSVersion12    = "VersionTLS12"
+	goTLSVersion13    = "VersionTLS13"
+	shortTLSVersion10 = "TLS1.0"
+	shortTLSVersion11 = "TLS1.1"
+	shortTLSVersion12 = "TLS1.2"
+	shortTLSVersion13 = "TLS1.3"
+)
+
+// tlsVersion maps a minimum TLS version flag value to its crypto/tls value.
+// Accepts the Go version names used by kube-rbac-proxy (VersionTLS10 through
+// VersionTLS13) and the short-form names, so a configured minimum of TLS 1.0
+// or 1.1 can be honored exactly.
+func tlsVersion(versionName string) (uint16, error) {
+	versions := map[string]uint16{
+		goTLSVersion10:    tls.VersionTLS10,
+		goTLSVersion11:    tls.VersionTLS11,
+		goTLSVersion12:    tls.VersionTLS12,
+		goTLSVersion13:    tls.VersionTLS13,
+		shortTLSVersion10: tls.VersionTLS10,
+		shortTLSVersion11: tls.VersionTLS11,
+		shortTLSVersion12: tls.VersionTLS12,
+		shortTLSVersion13: tls.VersionTLS13,
+	}
+	version, ok := versions[versionName]
+	if !ok {
+		return 0, fmt.Errorf("unknown TLS MinVersion config provided: %q (expected VersionTLS10 through VersionTLS13 or TLS1.0 through TLS1.3)", versionName)
+	}
+	return version, nil
+}
+
 func parseCipherSuites(names []string) ([]uint16, error) {
 	cipherNameMap := make(map[string]uint16)
 
@@ -168,14 +198,11 @@ func (s *server) setupTLSListener(opts Opts) error {
 	config.CurvePreferences = curvePreferences
 
 	if len(opts.TLS.MinVersion) > 0 {
-		switch opts.TLS.MinVersion {
-		case tlsVersion12:
-			config.MinVersion = tls.VersionTLS12
-		case tlsVersion13:
-			config.MinVersion = tls.VersionTLS13
-		default:
-			return errors.New("unknown TLS MinVersion config provided")
+		minVersion, err := tlsVersion(opts.TLS.MinVersion)
+		if err != nil {
+			return err
 		}
+		config.MinVersion = minVersion
 	}
 
 	listenAddr := getListenAddress(opts.SecureBindAddress)
