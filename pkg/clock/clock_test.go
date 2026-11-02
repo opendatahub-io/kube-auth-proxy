@@ -239,6 +239,7 @@ var _ = Describe("Clock suite", func() {
 					atomic.StoreInt32(&after, 1)
 				}()
 				<-ready
+				time.Sleep(time.Millisecond)
 
 				err := testClock.Add(9 * time.Second)
 				Expect(err).ToNot(HaveOccurred())
@@ -253,8 +254,8 @@ var _ = Describe("Clock suite", func() {
 				var ticks int32
 				ready := make(chan struct{})
 				go func() {
-					close(ready)
 					tick := testClock.Tick(10 * time.Second)
+					close(ready)
 					for ticks < 5 {
 						<-tick
 						atomic.AddInt32(&ticks, 1)
