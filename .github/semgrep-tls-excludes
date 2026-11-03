@@ -1,0 +1,7 @@
+# These options are intentional, opt-in backward-compatibility escape hatches.
+# Keep each suppression scoped to the exact rule and source file. Do not add a
+# repository-wide suppression for TLS bypasses.
+go-tls-bypass:pkg/sessions/redis/redis_store.go
+go-tls-bypass:pkg/upstream/http.go
+go-tls-bypass:pkg/validation/options.go
+go-http-client-tls-override:providers/openshift.go

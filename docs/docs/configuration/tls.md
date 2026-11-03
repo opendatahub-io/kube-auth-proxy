@@ -32,9 +32,38 @@ There are two recommended configurations:
     The defaults set `TLS1.2` as the minimal version. 
     Regardless of the minimum version configured, `TLS1.3` is currently always used as the maximal version.
 
-    TLS server side cipher suites can be specified with `--tls-cipher-suite=TLS_RSA_WITH_RC4_128_SHA`.
+    TLS server side cipher suites can be specified with `--tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`.
     If not specified, the defaults from [`crypto/tls`](https://pkg.go.dev/crypto/tls#CipherSuites) of the currently used `go` version for building `oauth2-proxy` will be used.
     A complete list of valid TLS cipher suite names can be found in [`crypto/tls`](https://pkg.go.dev/crypto/tls#pkg-constants).
+
+### TLS certificate verification bypasses
+
+The following options are retained for backward compatibility with deployments
+that use private, self-signed, or otherwise non-standard certificates:
+
+- `--ssl-insecure-skip-verify` disables certificate verification for HTTPS
+  provider requests.
+- `--ssl-upstream-insecure-skip-verify` disables certificate verification for
+  HTTPS upstream and WebSocket requests.
+- `--redis-insecure-skip-tls-verify` disables certificate verification for
+  Redis TLS connections.
+
+All three options default to `false`. When enabled, TLS encryption remains in
+place but the peer is not authenticated: an attacker able to intercept the
+connection can present any certificate, read or modify the traffic, and proxy
+it to the intended destination. This can expose OAuth tokens, session data,
+credentials, and application traffic.
+
+Use the normal trust store or configure the relevant CA option instead:
+
+- Use `--provider-ca-file` (and, where appropriate,
+  `--use-system-trust-store`) for provider and OpenShift certificates.
+- Use `--redis-ca-path` for Redis certificates.
+- For upstreams, install the issuing CA in the system trust store or terminate
+  TLS through a trusted service mesh or reverse proxy.
+
+Only enable a bypass for a specifically identified legacy endpoint, keep the
+scope as narrow as possible, and do not use it for general certificate errors.
 
 ### Terminate TLS at Reverse Proxy, e.g. Nginx
 

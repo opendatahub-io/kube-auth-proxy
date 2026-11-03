@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -190,45 +191,33 @@ func TestOpenShiftProviderRedeemMissingCode(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing code")
 }
 
+// TestOpenShiftProviderCacheKeyFormat guards the cache-key contract directly:
+// the key must distinguish CA configurations by path and by content so that a
+// rotation behind the same path invalidates the client cache. It asserts
+// against the production key computation (caConfigCacheKey), not a local
+// re-implementation of the format.
 func TestOpenShiftProviderCacheKeyFormat(t *testing.T) {
-	tests := []struct {
-		name                string
-		useSystemTrustStore bool
-		caFiles             []string
-		expectedCacheKey    string
-	}{
-		{
-			name:                "System trust store enabled, single CA file",
-			useSystemTrustStore: true,
-			caFiles:             []string{"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			expectedCacheKey:    "true:/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-		},
-		{
-			name:                "System trust store disabled, single CA file",
-			useSystemTrustStore: false,
-			caFiles:             []string{"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			expectedCacheKey:    "false:/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-		},
-		{
-			name:                "System trust store enabled, multiple CA files",
-			useSystemTrustStore: true,
-			caFiles:             []string{"/custom/ca1.crt", "/custom/ca2.crt"},
-			expectedCacheKey:    "true:/custom/ca1.crt,/custom/ca2.crt",
-		},
-		{
-			name:                "System trust store disabled, multiple CA files",
-			useSystemTrustStore: false,
-			caFiles:             []string{"/custom/ca1.crt", "/custom/ca2.crt"},
-			expectedCacheKey:    "false:/custom/ca1.crt,/custom/ca2.crt",
-		},
-	}
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "ca.crt")
+	otherFile := filepath.Join(dir, "other-ca.crt")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actualKey := formatCacheKey(tt.useSystemTrustStore, tt.caFiles)
-			assert.Equal(t, tt.expectedCacheKey, actualKey)
-		})
-	}
+	v1 := caConfigCacheKey([]string{caFile}, [][]byte{[]byte("ca-bundle-v1")})
+	v1Again := caConfigCacheKey([]string{caFile}, [][]byte{[]byte("ca-bundle-v1")})
+	assert.Equal(t, v1, v1Again, "identical paths and contents must produce identical keys")
+
+	v2 := caConfigCacheKey([]string{caFile}, [][]byte{[]byte("ca-bundle-v2")})
+	assert.NotEqual(t, v1, v2, "rotated contents under the same path must change the key")
+
+	sameContentOtherPath := caConfigCacheKey([]string{otherFile}, [][]byte{[]byte("ca-bundle-v1")})
+	assert.NotEqual(t, v1, sameContentOtherPath, "the path must be part of the key")
+
+	multi := caConfigCacheKey([]string{caFile, otherFile}, [][]byte{[]byte("ca-bundle-v1"), []byte("ca-bundle-v1")})
+	assert.NotEqual(t, v1, multi, "adding a CA file must change the key")
+
+	missing := caConfigCacheKey([]string{caFile}, [][]byte{nil})
+	assert.NotEqual(t, v1, missing, "an unreadable or empty file must not share a key with real content")
+	oneByte := caConfigCacheKey([]string{caFile}, [][]byte{{1}})
+	assert.NotEqual(t, missing, oneByte, "the missing-file marker must not collide with single-byte content")
 }
 
 func TestDiscoverValidateURL(t *testing.T) {
@@ -591,10 +580,54 @@ func writeTestServerCA(t *testing.T, server *httptest.Server) string {
 	return f.Name()
 }
 
-// Helper function to test cache key formatting
-func formatCacheKey(useSystemTrustStore bool, capaths []string) string {
-	if useSystemTrustStore {
-		return "true:" + strings.Join(capaths, ",")
-	}
-	return "false:" + strings.Join(capaths, ",")
+// TestOpenShiftClientCacheKeysOnCAFileContents guards against stale trust pools:
+// the HTTP client cache must key on CA file contents, not just paths, so that
+// rotating the CA behind a mounted secret refreshes the in-memory pool.
+func TestOpenShiftClientCacheKeysOnCAFileContents(t *testing.T) {
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "ca.crt")
+	require.NoError(t, os.WriteFile(caFile, []byte("ca-bundle-v1"), 0o600))
+
+	p := &OpenShiftProvider{CAFiles: []string{caFile}}
+
+	client1, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	client2, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.Same(t, client1, client2, "unchanged CA file should reuse the cached client")
+
+	require.NoError(t, os.WriteFile(caFile, []byte("ca-bundle-v2"), 0o600))
+	client3, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.NotSame(t, client1, client3, "rotated CA contents must build a new client")
+
+	// A missing CA file serves a fallback client (without that CA) keyed by
+	// its own marker state: it is cached and reused while the file is
+	// unavailable, and it can never shadow a content-keyed client.
+	require.NoError(t, os.Remove(caFile))
+	fallback1, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	fallback2, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.Same(t, fallback1, fallback2, "persistently missing CA file should reuse the cached fallback client")
+
+	// Recovery switches to the content key; the content client cached before
+	// the outage was evicted by the fallback, so a fresh client is built.
+	require.NoError(t, os.WriteFile(caFile, []byte("ca-bundle-v2"), 0o600))
+	client4, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.NotSame(t, client3, client4, "recovered content must build a new client")
+
+	// An empty CA file gets the same marker treatment as an unreadable one.
+	require.NoError(t, os.WriteFile(caFile, []byte(""), 0o600))
+	emptyFallback1, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	emptyFallback2, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.Same(t, emptyFallback1, emptyFallback2, "empty CA file should reuse the cached fallback client")
+
+	require.NoError(t, os.WriteFile(caFile, []byte("ca-bundle-v3"), 0o600))
+	client5, err := p.newOpenShiftClient()
+	require.NoError(t, err)
+	assert.NotSame(t, client4, client5, "content after an empty CA file must build a new client")
 }
