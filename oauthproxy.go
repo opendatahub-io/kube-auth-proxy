@@ -38,6 +38,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/ip"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/middleware"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests"
 	requestutil "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests/util"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/upstream"
@@ -842,7 +843,14 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 	// OIDC frontend logout: redirect browser to IdP's end_session_endpoint
 	// so the IdP can clear its SSO session. Same approach as OCP console.
 	if p.supportsRPInitiatedLogout() {
-		p.frontendLogout(rw, req, session)
+		// First attempt a server-side (backchannel) end-session request. When
+		// the provider supports it, the IdP session is terminated without the
+		// browser ever visiting the IdP.
+		if p.backchannelLogout(req, session) {
+			http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
+			return
+		}
+		p.frontendLogout(rw, req, session, p.getOAuthRedirectURI(req))
 		return
 	}
 
@@ -962,10 +970,76 @@ func redactSensitiveQueryParams(rawURL string) string {
 	return parsedURL.String()
 }
 
+// backchannelLogoutTimeout bounds the end-session POST so sign-out can never
+// hang waiting for a provider that does not answer.
+var backchannelLogoutTimeout = 5 * time.Second
+
+// backchannelLogout attempts a server-side end-session request against the
+// provider's discovered end_session_endpoint: a form POST of the client
+// credentials and the session's refresh token (the Keycloak convention).
+// It returns true only on a definitive success (HTTP 204 exactly), meaning the
+// IdP session was terminated server-side and the browser never needs to visit
+// the IdP. Any other outcome means "unsupported" and the caller falls through
+// to the front-channel logout, which is never worse than today's behavior.
+func (p *OAuthProxy) backchannelLogout(req *http.Request, session *sessionsapi.SessionState) bool {
+	if session == nil || session.RefreshToken == "" {
+		return false
+	}
+
+	providerData := p.provider.Data()
+	if providerData.EndSessionURL == nil || providerData.ClientID == "" {
+		return false
+	}
+	clientSecret, err := providerData.GetClientSecret()
+	if err != nil || clientSecret == "" {
+		return false
+	}
+
+	form := url.Values{}
+	form.Set("client_id", providerData.ClientID)
+	form.Set("client_secret", clientSecret)
+	form.Set("refresh_token", session.RefreshToken)
+
+	ctx, cancel := context.WithTimeout(req.Context(), backchannelLogoutTimeout)
+	defer cancel()
+
+	endSessionReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		providerData.EndSessionURL.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		logger.Errorf("SignOut: failed to create end-session request: %v", err)
+		return false
+	}
+	endSessionReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// The endpoint is the one discovered at startup from the configured issuer,
+	// the same trust path used for token redemption.
+	resp, err := requests.DefaultHTTPClient.Do(endSessionReq)
+	if err != nil {
+		logger.Errorf("SignOut: backchannel logout request failed: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Only HTTP 204 No Content is a definitive success. Keycloak (and other
+	// OPs) return 200 with an HTML confirmation page when the request lacks
+	// sufficient credentials; treating any 2xx as success would be wrong.
+	if resp.StatusCode != http.StatusNoContent {
+		logger.Printf("SignOut: backchannel logout not supported by provider (status %d), using front-channel logout", resp.StatusCode)
+		return false
+	}
+
+	logger.Printf("SignOut: backchannel logout terminated the provider session (status %d)", resp.StatusCode)
+	return true
+}
+
 // frontendLogout redirects the browser to the IdP's end_session_endpoint
 // so the IdP can clear its SSO session. The local session cookie is already
 // cleared by the caller. This matches the OCP console logout approach.
-func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState) {
+// When postLogoutRedirectURI is set, it is sent as post_logout_redirect_uri so
+// the IdP returns the browser to the proxy afterwards instead of stranding it
+// on the IdP's own logout page. The OAuth callback URL is used because it is
+// already registered at the IdP whenever login works at all.
+func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState, postLogoutRedirectURI string) {
 	logoutURL := p.getLogoutURL()
 	if logoutURL == "" {
 		logger.Printf("SignOut: No logout URL available, redirecting to /")
@@ -979,6 +1053,14 @@ func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, s
 			separator = "&"
 		}
 		logoutURL += separator + "id_token_hint=" + url.QueryEscape(session.IDToken)
+	}
+
+	if postLogoutRedirectURI != "" {
+		separator := "?"
+		if strings.Contains(logoutURL, "?") {
+			separator = "&"
+		}
+		logoutURL += separator + "post_logout_redirect_uri=" + url.QueryEscape(postLogoutRedirectURI)
 	}
 
 	logger.Printf("SignOut: Redirecting to IdP logout: %s", redactSensitiveQueryParams(logoutURL))
@@ -1081,6 +1163,15 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 		message := fmt.Sprintf("Login Failed: The upstream identity provider returned an error: %s", errorString)
 		// Set the debug message and override the non debug message to be the same for this case
 		p.ErrorPage(rw, req, http.StatusForbidden, message, message)
+		return
+	}
+
+	// A callback hit with neither code nor error is the post-logout landing:
+	// the IdP redirected the browser back after RP-initiated logout. Send it
+	// to the sign-in flow instead of rendering an error page.
+	if req.Form.Get("code") == "" {
+		logger.Printf("OAuth callback hit without code or error, redirecting to sign-in")
+		http.Redirect(rw, req, p.SignInPath, http.StatusFound)
 		return
 	}
 

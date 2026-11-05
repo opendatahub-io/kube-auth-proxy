@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -3733,6 +3735,7 @@ func TestGetLogoutURLReturnsEmptyWhenNil(t *testing.T) {
 
 func TestSignOutOIDCClearsCookieAndRedirectsToIdP(t *testing.T) {
 	opts := baseTestOptions()
+	opts.RawRedirectURL = "https://proxy.example.com/oauth2/callback"
 	require.NoError(t, validation.Validate(opts))
 
 	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
@@ -3749,7 +3752,10 @@ func TestSignOutOIDCClearsCookieAndRedirectsToIdP(t *testing.T) {
 
 	location := rw.Header().Get("Location")
 	assert.Contains(t, location, "https://login.microsoftonline.com/tenant/oauth2/v2.0/logout")
-	assert.NotContains(t, location, "post_logout_redirect_uri")
+	// The IdP must be told where to send the browser afterwards so the user is
+	// not stranded on the IdP's own logout page. The target is the OAuth
+	// callback, which is already registered at the IdP by construction.
+	assert.Contains(t, location, "post_logout_redirect_uri="+url.QueryEscape("https://proxy.example.com/oauth2/callback"))
 	assert.NotContains(t, location, "state=logout")
 }
 
@@ -3768,6 +3774,215 @@ func TestSignOutNonOIDCClearsCookieDirectly(t *testing.T) {
 
 	assert.Equal(t, http.StatusFound, rw.Code)
 	assert.NotContains(t, rw.Header().Get("Location"), "login.microsoftonline.com")
+}
+
+// newSignOutProxyWithSession builds a proxy whose provider end_session_endpoint
+// points at idpURL (skipped when empty) and returns the proxy together with a
+// /oauth2/sign_out request carrying a valid session cookie for session
+// (no cookie attached when session is nil).
+func newSignOutProxyWithSession(t *testing.T, idpURL string, session *sessions.SessionState) (*OAuthProxy, *http.Request) {
+	t.Helper()
+
+	opts := baseTestOptions()
+	opts.RawRedirectURL = "https://proxy.example.com/oauth2/callback"
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	// Avoid session refresh/validation side effects in the session middleware.
+	proxy.CookieOptions.Refresh = time.Duration(0)
+
+	if idpURL != "" {
+		endSessionURL, err := url.Parse(idpURL)
+		require.NoError(t, err)
+		proxy.provider.Data().EndSessionURL = endSessionURL
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "/oauth2/sign_out", nil)
+	if session != nil {
+		saveRw := httptest.NewRecorder()
+		saveReq, _ := http.NewRequest(http.MethodGet, "/", nil)
+		require.NoError(t, proxy.SaveSession(saveRw, saveReq, session))
+		for _, cookie := range saveRw.Result().Cookies() {
+			req.AddCookie(cookie)
+		}
+	}
+	return proxy, req
+}
+
+func TestSignOutBackchannelLogoutSuccess(t *testing.T) {
+	var requestCount int
+	var gotMethod string
+	var gotPostForm url.Values
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		gotMethod = r.Method
+		require.NoError(t, r.ParseForm())
+		gotPostForm = r.PostForm
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mockIDP.Close()
+
+	session := &sessions.SessionState{
+		Email:        "test@example.com",
+		IDToken:      "some-id-token",
+		RefreshToken: "some-refresh-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	// Backchannel success: the IdP session was killed server-side, so the
+	// browser goes straight back to the app, never to the IdP.
+	location := rw.Header().Get("Location")
+	assert.Equal(t, "/", location)
+	assert.NotContains(t, location, mockIDP.URL)
+
+	// The IdP received the end-session POST with the backchannel credentials.
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, http.MethodPost, gotMethod)
+	assert.Equal(t, clientID, gotPostForm.Get("client_id"))
+	assert.Equal(t, clientSecret, gotPostForm.Get("client_secret"))
+	assert.Equal(t, "some-refresh-token", gotPostForm.Get("refresh_token"))
+}
+
+func TestSignOutBackchannelNon204FallsThroughToFrontchannel(t *testing.T) {
+	var requestCount int
+	// Keycloak returns 200 with an HTML confirmation page when the backchannel
+	// convention is not satisfied. This must NOT be misread as success.
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html><body>logout confirmation</body></html>"))
+	}))
+	defer mockIDP.Close()
+
+	session := &sessions.SessionState{
+		Email:        "test@example.com",
+		IDToken:      "some-id-token",
+		RefreshToken: "some-refresh-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	// Unsupported backchannel: fall through to front-channel RP-initiated logout
+	// with both the id_token_hint and the post-logout redirect target.
+	location := rw.Header().Get("Location")
+	assert.True(t, strings.HasPrefix(location, mockIDP.URL), "expected redirect to IdP, got %q", location)
+	assert.Contains(t, location, "id_token_hint=")
+	assert.Contains(t, location, "post_logout_redirect_uri="+url.QueryEscape("https://proxy.example.com/oauth2/callback"))
+	// The backchannel attempt was actually made before falling through.
+	assert.Equal(t, 1, requestCount)
+}
+
+func TestSignOutBackchannelSkippedWithoutRefreshToken(t *testing.T) {
+	var requestCount int
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mockIDP.Close()
+
+	// Session without a refresh token: the backchannel cannot be attempted.
+	session := &sessions.SessionState{
+		Email:   "test@example.com",
+		IDToken: "some-id-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	assert.Equal(t, 0, requestCount, "backchannel must not be attempted without a refresh token")
+	location := rw.Header().Get("Location")
+	assert.True(t, strings.HasPrefix(location, mockIDP.URL), "expected front-channel redirect to IdP, got %q", location)
+	assert.Contains(t, location, "id_token_hint=")
+	assert.Contains(t, location, "post_logout_redirect_uri=")
+}
+
+func TestSignOutBackchannelTimeoutFallsThrough(t *testing.T) {
+	// Shorten the timeout so the test is fast; the server hangs past it.
+	originalTimeout := backchannelLogoutTimeout
+	backchannelLogoutTimeout = 100 * time.Millisecond
+	defer func() { backchannelLogoutTimeout = originalTimeout }()
+
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Second)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mockIDP.Close()
+
+	session := &sessions.SessionState{
+		Email:        "test@example.com",
+		IDToken:      "some-id-token",
+		RefreshToken: "some-refresh-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	rw := httptest.NewRecorder()
+	start := time.Now()
+	proxy.ServeHTTP(rw, req)
+	elapsed := time.Since(start)
+
+	// Sign-out must be bounded by the timeout, not the hanging server...
+	assert.Less(t, elapsed, 500*time.Millisecond, "sign-out must not hang on an unresponsive IdP")
+	// ...and must degrade to the front-channel logout.
+	assert.Equal(t, http.StatusFound, rw.Code)
+	location := rw.Header().Get("Location")
+	assert.True(t, strings.HasPrefix(location, mockIDP.URL), "expected front-channel redirect to IdP, got %q", location)
+	assert.Contains(t, location, "id_token_hint=")
+	assert.Contains(t, location, "post_logout_redirect_uri=")
+}
+
+func TestSignOutLogsDoNotLeakBackchannelSecrets(t *testing.T) {
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mockIDP.Close()
+
+	session := &sessions.SessionState{
+		Email:        "test@example.com",
+		IDToken:      "some-id-token",
+		RefreshToken: "some-refresh-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	defer logger.SetOutput(os.Stdout)
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+	assert.Equal(t, http.StatusFound, rw.Code)
+
+	logOutput := logBuf.String()
+	assert.NotContains(t, logOutput, clientSecret, "client secret must never appear in logs")
+	assert.NotContains(t, logOutput, "some-refresh-token", "refresh token must never appear in logs")
+	assert.NotContains(t, logOutput, "some-id-token", "id token must never appear in logs")
+}
+
+func TestOAuthCallbackWithoutParamsRedirectsToSignIn(t *testing.T) {
+	opts := baseTestOptions()
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+
+	// The IdP redirects the browser back to the callback after RP-initiated
+	// logout, with no code and no error. This must not render an error page.
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/oauth2/callback", nil)
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	assert.Equal(t, "/oauth2/sign_in", rw.Header().Get("Location"))
 }
 
 func TestDeleteOAuthAccessTokenSkipsForNonOpenShiftProvider(t *testing.T) {
