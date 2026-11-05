@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -1319,3 +1320,44 @@ func skipDevContainer() {
 		Skip("Skipping testing in DevContainer environment")
 	}
 }
+
+var _ = Describe("nextProtos", func() {
+	type nextProtosTableInput struct {
+		minVersion   uint16
+		cipherSuites []uint16
+		expected     []string
+	}
+
+	DescribeTable("returns the ALPN protocols the TLS config can serve", func(in *nextProtosTableInput) {
+		Expect(nextProtos(in.minVersion, in.cipherSuites)).To(Equal(in.expected))
+	},
+		Entry("TLS 1.2 with Go default suites advertises h2", &nextProtosTableInput{
+			minVersion: tls.VersionTLS12,
+			expected:   []string{"h2", "http/1.1"},
+		}),
+		Entry("TLS 1.3 always advertises h2", &nextProtosTableInput{
+			minVersion:   tls.VersionTLS13,
+			cipherSuites: []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
+			expected:     []string{"h2", "http/1.1"},
+		}),
+		Entry("TLS 1.2 with an ECDHE AES-128-GCM suite advertises h2", &nextProtosTableInput{
+			minVersion:   tls.VersionTLS12,
+			cipherSuites: []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
+			expected:     []string{"h2", "http/1.1"},
+		}),
+		Entry("TLS 1.2 with only AES-256-GCM suites is HTTP/1.1 only", &nextProtosTableInput{
+			minVersion:   tls.VersionTLS12,
+			cipherSuites: []uint16{tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384},
+			expected:     []string{"http/1.1"},
+		}),
+		Entry("TLS 1.2 with only ChaCha20 suites is HTTP/1.1 only", &nextProtosTableInput{
+			minVersion:   tls.VersionTLS12,
+			cipherSuites: []uint16{tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
+			expected:     []string{"http/1.1"},
+		}),
+		Entry("TLS 1.1 minimum is HTTP/1.1 only", &nextProtosTableInput{
+			minVersion: tls.VersionTLS11,
+			expected:   []string{"http/1.1"},
+		}),
+	)
+})

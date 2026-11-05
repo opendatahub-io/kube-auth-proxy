@@ -173,7 +173,6 @@ func (s *server) setupTLSListener(opts Opts) error {
 
 	config := &tls.Config{
 		MinVersion: tls.VersionTLS12, // default, override below
-		NextProtos: []string{"h2", "http/1.1"},
 	}
 	if opts.TLS == nil {
 		return errors.New("no TLS config provided")
@@ -204,6 +203,7 @@ func (s *server) setupTLSListener(opts Opts) error {
 		}
 		config.MinVersion = minVersion
 	}
+	config.NextProtos = nextProtos(config.MinVersion, config.CipherSuites)
 
 	listenAddr := getListenAddress(opts.SecureBindAddress)
 
@@ -215,6 +215,39 @@ func (s *server) setupTLSListener(opts Opts) error {
 	s.tlsListener = tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, config)
 	s.tlsConfig = config
 	return nil
+}
+
+// nextProtos returns the ALPN protocols for the effective TLS
+// configuration. Go's net/http requires TLS 1.2+ and an ECDHE AES-128-GCM
+// cipher suite to serve HTTP/2, so h2 is advertised only when the minimum
+// version and cipher list can serve it; otherwise the listener is
+// HTTP/1.1 only.
+func nextProtos(minVersion uint16, cipherSuites []uint16) []string {
+	if minVersion >= tls.VersionTLS12 && servesHTTP2(minVersion, cipherSuites) {
+		return []string{"h2", "http/1.1"}
+	}
+	return []string{"http/1.1"}
+}
+
+// servesHTTP2 reports whether the effective cipher configuration can serve
+// HTTP/2. TLS 1.3 always qualifies because its suites are runtime-managed
+// and include AES-128-GCM. For lower minimums, an empty list keeps Go's
+// default suites (which include ECDHE AES-128-GCM); an explicit list must
+// contain one of the two ECDHE AES-128-GCM suites net/http requires.
+func servesHTTP2(minVersion uint16, cipherSuites []uint16) bool {
+	if minVersion >= tls.VersionTLS13 {
+		return true
+	}
+	if len(cipherSuites) == 0 {
+		return true
+	}
+	for _, id := range cipherSuites {
+		if id == tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 ||
+			id == tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 {
+			return true
+		}
+	}
+	return false
 }
 
 // Start starts the HTTP and HTTPS server if applicable.
