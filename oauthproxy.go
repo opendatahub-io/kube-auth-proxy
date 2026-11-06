@@ -930,6 +930,10 @@ func tokenToObjectName(token string) string {
 	return sha256Prefix + base64.RawURLEncoding.EncodeToString(h[:])
 }
 
+// backendLogoutTimeout bounds the --backend-logout-url request so sign-out
+// can never hang on an unresponsive backend.
+var backendLogoutTimeout = 10 * time.Second
+
 func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	session, err := p.getAuthenticatedSession(rw, req)
 	if err != nil {
@@ -949,7 +953,14 @@ func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	backendLogoutURL := strings.ReplaceAll(providerData.BackendLogoutURL, "{id_token}", session.IDToken)
 	// security exception because URL is dynamic ({id_token} replacement) but
 	// base is not end-user provided but comes from configuration somewhat secure
-	resp, err := http.Get(backendLogoutURL) // #nosec G107
+	ctx, cancel := context.WithTimeout(req.Context(), backendLogoutTimeout)
+	defer cancel()
+	backendReq, err := http.NewRequestWithContext(ctx, http.MethodGet, backendLogoutURL, nil)
+	if err != nil {
+		logger.Errorf("error while creating backend logout request: %v", err)
+		return
+	}
+	resp, err := requests.DefaultHTTPClient.Do(backendReq) // #nosec G107
 	if err != nil {
 		logger.Errorf("error while calling backend logout: %v", err)
 		return

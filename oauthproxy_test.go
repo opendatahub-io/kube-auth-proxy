@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4005,6 +4006,45 @@ func TestSignOutOmitsPostLogoutRedirectWhenURINotConfigured(t *testing.T) {
 	assert.Contains(t, location, "https://idp.example.com/logout")
 	assert.Contains(t, location, "id_token_hint=")
 	assert.NotContains(t, location, "post_logout_redirect_uri")
+}
+
+func TestBackendLogoutRequestIsBounded(t *testing.T) {
+	// --backend-logout-url is called synchronously during sign-out; a hung
+	// backend must not hang the logout response indefinitely.
+	originalTimeout := backendLogoutTimeout
+	backendLogoutTimeout = 100 * time.Millisecond
+	defer func() { backendLogoutTimeout = originalTimeout }()
+
+	var mu sync.Mutex
+	var gotPath string
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath = r.URL.Path
+		mu.Unlock()
+		time.Sleep(time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockBackend.Close()
+
+	session := &sessions.SessionState{
+		Email:   "test@example.com",
+		IDToken: "some-id-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, "", session)
+	proxy.provider.Data().BackendLogoutURL = mockBackend.URL + "/bl?id_token_hint={id_token}"
+
+	rw := httptest.NewRecorder()
+	start := time.Now()
+	proxy.ServeHTTP(rw, req)
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 500*time.Millisecond, "backend logout must not hang sign-out")
+	assert.Equal(t, http.StatusFound, rw.Code)
+	assert.Equal(t, "/", rw.Header().Get("Location"))
+	// The backend was actually called (with the id_token substitution applied)
+	mu.Lock()
+	assert.Equal(t, "/bl", gotPath)
+	mu.Unlock()
 }
 
 func TestOAuthCallbackWithoutParamsRedirectsToSignIn(t *testing.T) {
