@@ -3957,7 +3957,11 @@ func TestSignOutLogsDoNotLeakBackchannelSecrets(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	logger.SetOutput(&logBuf)
-	defer logger.SetOutput(os.Stdout)
+	logger.SetErrOutput(&logBuf)
+	defer func() {
+		logger.SetOutput(os.Stdout)
+		logger.SetErrOutput(os.Stderr)
+	}()
 
 	rw := httptest.NewRecorder()
 	proxy.ServeHTTP(rw, req)
@@ -4045,6 +4049,61 @@ func TestBackendLogoutRequestIsBounded(t *testing.T) {
 	mu.Lock()
 	assert.Equal(t, "/bl", gotPath)
 	mu.Unlock()
+}
+
+func TestBackendLogoutErrorDoesNotLeakIDToken(t *testing.T) {
+	session := &sessions.SessionState{
+		Email:   "test@example.com",
+		IDToken: "some-id-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, "", session)
+	// Port 1 on localhost: connection refused, fails immediately.
+	// The {id_token} substitution puts the ID token in the request URL.
+	proxy.provider.Data().BackendLogoutURL = "http://127.0.0.1:1/bl?id_token_hint={id_token}"
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	logger.SetErrOutput(&logBuf)
+	defer func() {
+		logger.SetOutput(os.Stdout)
+		logger.SetErrOutput(os.Stderr)
+	}()
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	assert.NotContains(t, logBuf.String(), "some-id-token", "id_token must never appear in backend logout error logs")
+}
+
+func TestSignOutBackchannelDoesNotFollowRedirects(t *testing.T) {
+	// A redirect chain that ends in 204 must not be misread as backchannel
+	// success: the POST body (the credentials) is dropped when the client
+	// follows a redirect, so no logout would have happened at the final hop.
+	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/final" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Redirect(w, r, "/final", http.StatusFound)
+	}))
+	defer mockIDP.Close()
+
+	session := &sessions.SessionState{
+		Email:        "test@example.com",
+		IDToken:      "some-id-token",
+		RefreshToken: "some-refresh-token",
+	}
+	proxy, req := newSignOutProxyWithSession(t, mockIDP.URL, session)
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	location := rw.Header().Get("Location")
+	assert.True(t, strings.HasPrefix(location, mockIDP.URL), "a redirect must not be treated as backchannel success, got %q", location)
+	assert.Contains(t, location, "id_token_hint=")
+	assert.Contains(t, location, "post_logout_redirect_uri=")
 }
 
 func TestOAuthCallbackWithoutParamsRedirectsToSignIn(t *testing.T) {

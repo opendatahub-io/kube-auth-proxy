@@ -962,6 +962,13 @@ func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	}
 	resp, err := requests.DefaultHTTPClient.Do(backendReq) // #nosec G107
 	if err != nil {
+		// A *url.Error embeds the full request URL, which contains the
+		// substituted {id_token} — log only the underlying cause so the
+		// token never reaches the logs.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		logger.Errorf("error while calling backend logout: %v", err)
 		return
 	}
@@ -1034,8 +1041,17 @@ func (p *OAuthProxy) backchannelLogout(req *http.Request, session *sessionsapi.S
 	endSessionReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	// The endpoint is the one discovered at startup from the configured issuer,
-	// the same trust path used for token redemption.
-	resp, err := requests.DefaultHTTPClient.Do(endSessionReq)
+	// the same trust path used for token redemption. Redirects are not
+	// followed: the POST body (the credentials) is dropped when a client
+	// follows a redirect, so a redirect chain ending in 204 must not be
+	// misread as success.
+	logoutClient := &http.Client{
+		Transport: requests.DefaultHTTPClient.Transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := logoutClient.Do(endSessionReq)
 	if err != nil {
 		logger.Errorf("SignOut: backchannel logout request failed: %v", err)
 		return false
