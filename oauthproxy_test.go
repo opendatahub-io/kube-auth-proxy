@@ -3968,6 +3968,45 @@ func TestSignOutLogsDoNotLeakBackchannelSecrets(t *testing.T) {
 	assert.NotContains(t, logOutput, "some-id-token", "id token must never appear in logs")
 }
 
+func TestSignOutOmitsPostLogoutRedirectWhenURINotConfigured(t *testing.T) {
+	// Without an explicitly configured --redirect-url, the redirect URI is
+	// derived from the request Host header. That request-derived value must
+	// not be sent to the IdP as a post-logout redirect target: unlike the
+	// login redirect_uri it is not guaranteed to be validated against the
+	// IdP's registered URIs by every provider.
+	opts := baseTestOptions()
+	// RawRedirectURL deliberately left empty (request-derived mode)
+	require.NoError(t, validation.Validate(opts))
+
+	proxy, err := NewOAuthProxy(opts, func(string) bool { return true }, nil)
+	require.NoError(t, err)
+	proxy.CookieOptions.Refresh = time.Duration(0)
+
+	endSessionURL, _ := url.Parse("https://idp.example.com/logout")
+	proxy.provider.Data().EndSessionURL = endSessionURL
+
+	session := &sessions.SessionState{
+		Email:   "test@example.com",
+		IDToken: "some-id-token",
+	}
+	saveRw := httptest.NewRecorder()
+	saveReq, _ := http.NewRequest(http.MethodGet, "/", nil)
+	require.NoError(t, proxy.SaveSession(saveRw, saveReq, session))
+	req, _ := http.NewRequest(http.MethodGet, "/oauth2/sign_out", nil)
+	for _, cookie := range saveRw.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	rw := httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, http.StatusFound, rw.Code)
+	location := rw.Header().Get("Location")
+	assert.Contains(t, location, "https://idp.example.com/logout")
+	assert.Contains(t, location, "id_token_hint=")
+	assert.NotContains(t, location, "post_logout_redirect_uri")
+}
+
 func TestOAuthCallbackWithoutParamsRedirectsToSignIn(t *testing.T) {
 	opts := baseTestOptions()
 	require.NoError(t, validation.Validate(opts))

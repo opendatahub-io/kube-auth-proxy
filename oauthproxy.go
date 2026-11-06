@@ -850,7 +850,18 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 			http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
 			return
 		}
-		p.frontendLogout(rw, req, session, p.getOAuthRedirectURI(req))
+		// Only advertise a post-logout redirect target when it comes from
+		// explicit server configuration (--redirect-url with a host). When
+		// the redirect URL is unset, getOAuthRedirectURI derives it from the
+		// request Host header — a request-derived value must not be sent to
+		// the IdP as a redirect target, since unlike the login redirect_uri
+		// it is not guaranteed to be validated against registered URIs by
+		// every provider.
+		postLogoutRedirectURI := ""
+		if p.redirectURL.Host != "" {
+			postLogoutRedirectURI = p.getOAuthRedirectURI(req)
+		}
+		p.frontendLogout(rw, req, session, postLogoutRedirectURI)
 		return
 	}
 
