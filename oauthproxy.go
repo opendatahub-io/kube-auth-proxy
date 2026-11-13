@@ -38,6 +38,7 @@ import (
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/ip"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/logger"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/middleware"
+	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests"
 	requestutil "github.com/opendatahub-io/kube-auth-proxy/v1/pkg/requests/util"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/sessions"
 	"github.com/opendatahub-io/kube-auth-proxy/v1/pkg/upstream"
@@ -842,7 +843,25 @@ func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 	// OIDC frontend logout: redirect browser to IdP's end_session_endpoint
 	// so the IdP can clear its SSO session. Same approach as OCP console.
 	if p.supportsRPInitiatedLogout() {
-		p.frontendLogout(rw, req, session)
+		// First attempt a server-side (backchannel) end-session request. When
+		// the provider supports it, the IdP session is terminated without the
+		// browser ever visiting the IdP.
+		if p.backchannelLogout(req, session) {
+			http.Redirect(rw, req, redirect, http.StatusFound) //nolint:gosec // G710 - redirect target validated by GetRedirect()
+			return
+		}
+		// Only advertise a post-logout redirect target when it comes from
+		// explicit server configuration (--redirect-url with a host). When
+		// the redirect URL is unset, getOAuthRedirectURI derives it from the
+		// request Host header — a request-derived value must not be sent to
+		// the IdP as a redirect target, since unlike the login redirect_uri
+		// it is not guaranteed to be validated against registered URIs by
+		// every provider.
+		postLogoutRedirectURI := ""
+		if p.redirectURL.Host != "" {
+			postLogoutRedirectURI = p.getOAuthRedirectURI(req)
+		}
+		p.frontendLogout(rw, req, session, postLogoutRedirectURI)
 		return
 	}
 
@@ -911,6 +930,20 @@ func tokenToObjectName(token string) string {
 	return sha256Prefix + base64.RawURLEncoding.EncodeToString(h[:])
 }
 
+// backendLogoutTimeout bounds the --backend-logout-url request so sign-out
+// can never hang on an unresponsive backend.
+var backendLogoutTimeout = 10 * time.Second
+
+// sanitizeURLError strips the URL from a *url.Error so that a token-bearing
+// request URL can never reach the logs via error messages.
+func sanitizeURLError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
 func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	session, err := p.getAuthenticatedSession(rw, req)
 	if err != nil {
@@ -930,9 +963,21 @@ func (p *OAuthProxy) backendLogout(rw http.ResponseWriter, req *http.Request) {
 	backendLogoutURL := strings.ReplaceAll(providerData.BackendLogoutURL, "{id_token}", session.IDToken)
 	// security exception because URL is dynamic ({id_token} replacement) but
 	// base is not end-user provided but comes from configuration somewhat secure
-	resp, err := http.Get(backendLogoutURL) // #nosec G107
+	ctx, cancel := context.WithTimeout(req.Context(), backendLogoutTimeout)
+	defer cancel()
+	backendReq, err := http.NewRequestWithContext(ctx, http.MethodGet, backendLogoutURL, nil)
 	if err != nil {
-		logger.Errorf("error while calling backend logout: %v", err)
+		// The parse error embeds the full request URL, which contains the
+		// substituted {id_token} — log only the underlying cause.
+		logger.Errorf("error while creating backend logout request: %v", sanitizeURLError(err))
+		return
+	}
+	resp, err := requests.DefaultHTTPClient.Do(backendReq) // #nosec G107
+	if err != nil {
+		// A *url.Error embeds the full request URL, which contains the
+		// substituted {id_token} — log only the underlying cause so the
+		// token never reaches the logs.
+		logger.Errorf("error while calling backend logout: %v", sanitizeURLError(err))
 		return
 	}
 
@@ -950,7 +995,7 @@ func redactSensitiveQueryParams(rawURL string) string {
 	}
 
 	query := parsedURL.Query()
-	sensitiveParams := []string{"id_token_hint", options.ClaimIDToken, options.ClaimAccessToken, "refresh_token"}
+	sensitiveParams := []string{"id_token_hint", options.ClaimIDToken, options.ClaimAccessToken, "refresh_token", "post_logout_redirect_uri"}
 
 	for _, param := range sensitiveParams {
 		if query.Has(param) {
@@ -962,10 +1007,100 @@ func redactSensitiveQueryParams(rawURL string) string {
 	return parsedURL.String()
 }
 
+// backchannelLogoutTimeout bounds the end-session POST so sign-out can never
+// hang waiting for a provider that does not answer.
+var backchannelLogoutTimeout = 5 * time.Second
+
+// backchannelLogout attempts a server-side end-session request against the
+// provider's discovered end_session_endpoint: a form POST of the client
+// credentials and the session's refresh token (the Keycloak convention).
+// It returns true only on a definitive success (HTTP 204 exactly), meaning the
+// IdP session was terminated server-side and the browser never needs to visit
+// the IdP. Any other outcome means "unsupported" and the caller falls through
+// to the front-channel logout, which is never worse than today's behavior.
+func (p *OAuthProxy) backchannelLogout(req *http.Request, session *sessionsapi.SessionState) bool {
+	if session == nil || session.RefreshToken == "" {
+		return false
+	}
+
+	providerData := p.provider.Data()
+	if providerData.EndSessionURL == nil || providerData.ClientID == "" {
+		return false
+	}
+	clientSecret, err := providerData.GetClientSecret()
+	if err != nil || clientSecret == "" {
+		return false
+	}
+
+	form := url.Values{}
+	form.Set("client_id", providerData.ClientID)
+	form.Set("client_secret", clientSecret)
+	form.Set("refresh_token", session.RefreshToken)
+
+	ctx, cancel := context.WithTimeout(req.Context(), backchannelLogoutTimeout)
+	defer cancel()
+
+	endSessionReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		providerData.EndSessionURL.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		// A *url.Error embeds the full endpoint URL, which may carry query
+		// values — log only the underlying cause.
+		logger.Errorf("SignOut: failed to create end-session request: %v", sanitizeURLError(err))
+		return false
+	}
+	endSessionReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// The endpoint is the one discovered at startup from the configured issuer,
+	// the same trust path used for token redemption. Redirects are not
+	// followed: the POST body (the credentials) is dropped when a client
+	// follows a redirect, so a redirect chain ending in 204 must not be
+	// misread as success.
+	logoutClient := &http.Client{
+		Transport: requests.DefaultHTTPClient.Transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := logoutClient.Do(endSessionReq)
+	if err != nil {
+		// A *url.Error embeds the full endpoint URL, which may carry query
+		// values — log only the underlying cause (same treatment as the
+		// --backend-logout-url error path).
+		logger.Errorf("SignOut: backchannel logout request failed: %v", sanitizeURLError(err))
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Only HTTP 204 No Content is a definitive success. Keycloak (and other
+	// OPs) return 200 with an HTML confirmation page when the request lacks
+	// sufficient credentials; treating any 2xx as success would be wrong.
+	if resp.StatusCode != http.StatusNoContent {
+		logger.Printf("SignOut: backchannel logout not supported by provider (status %d), using front-channel logout", resp.StatusCode)
+		return false
+	}
+
+	logger.Printf("SignOut: backchannel logout terminated the provider session (status %d)", resp.StatusCode)
+	return true
+}
+
+// appendQueryParam appends a key=value pair to rawURL, picking the correct
+// query separator for a URL that may already carry a query string.
+func appendQueryParam(rawURL, key, value string) string {
+	separator := "?"
+	if strings.Contains(rawURL, "?") {
+		separator = "&"
+	}
+	return rawURL + separator + key + "=" + url.QueryEscape(value)
+}
+
 // frontendLogout redirects the browser to the IdP's end_session_endpoint
 // so the IdP can clear its SSO session. The local session cookie is already
 // cleared by the caller. This matches the OCP console logout approach.
-func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState) {
+// When postLogoutRedirectURI is set, it is sent as post_logout_redirect_uri so
+// the IdP returns the browser to the proxy afterwards instead of stranding it
+// on the IdP's own logout page. The OAuth callback URL is used because it is
+// already registered at the IdP whenever login works at all.
+func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, session *sessionsapi.SessionState, postLogoutRedirectURI string) {
 	logoutURL := p.getLogoutURL()
 	if logoutURL == "" {
 		logger.Printf("SignOut: No logout URL available, redirecting to /")
@@ -974,15 +1109,20 @@ func (p *OAuthProxy) frontendLogout(rw http.ResponseWriter, req *http.Request, s
 	}
 
 	if session != nil && session.IDToken != "" {
-		separator := "?"
-		if strings.Contains(logoutURL, "?") {
-			separator = "&"
-		}
-		logoutURL += separator + "id_token_hint=" + url.QueryEscape(session.IDToken)
+		logoutURL = appendQueryParam(logoutURL, "id_token_hint", session.IDToken)
+	} else if clientID := p.provider.Data().ClientID; clientID != "" {
+		// OIDC RP-initiated logout allows client_id as an alternative to
+		// id_token_hint so the IdP can identify the relying party (e.g. when
+		// the session carries no ID token, or there is no session at all).
+		logoutURL = appendQueryParam(logoutURL, "client_id", clientID)
+	}
+
+	if postLogoutRedirectURI != "" {
+		logoutURL = appendQueryParam(logoutURL, "post_logout_redirect_uri", postLogoutRedirectURI)
 	}
 
 	logger.Printf("SignOut: Redirecting to IdP logout: %s", redactSensitiveQueryParams(logoutURL))
-	http.Redirect(rw, req, logoutURL, http.StatusFound)
+	http.Redirect(rw, req, logoutURL, http.StatusFound) //nolint:gosec // G710 - logoutURL is built from the discovered end_session_endpoint (trusted provider config) with escaped params, never from request data
 }
 
 // getLogoutURL returns the end_session_endpoint discovered at startup.
@@ -1081,6 +1221,18 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 		message := fmt.Sprintf("Login Failed: The upstream identity provider returned an error: %s", errorString)
 		// Set the debug message and override the non debug message to be the same for this case
 		p.ErrorPage(rw, req, http.StatusForbidden, message, message)
+		return
+	}
+
+	// A callback hit with neither code nor error nor state is the post-logout
+	// landing: the IdP redirected the browser back after RP-initiated logout.
+	// Send it to the sign-in flow instead of rendering an error page. When a
+	// state is present, the existing decodeState / CSRF-cookie handling must
+	// still run (a state-bearing callback without a code is not a post-logout
+	// landing), preserving the redirectOnCSRFError behavior for that shape.
+	if req.Form.Get("code") == "" && req.Form.Get("state") == "" {
+		logger.Printf("OAuth callback hit without code, error or state, redirecting to sign-in")
+		http.Redirect(rw, req, p.SignInPath, http.StatusFound)
 		return
 	}
 
