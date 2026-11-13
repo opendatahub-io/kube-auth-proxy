@@ -3823,8 +3823,13 @@ func TestSignOutBackchannelLogoutSuccess(t *testing.T) {
 	var gotMethod string
 	var gotPostForm url.Values
 	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The handler runs on the server goroutine: every captured field is
+		// guarded by mu, and the reads below happen under the same lock —
+		// an HTTP response is not a synchronization primitive.
+		mu.Lock()
 		requestCount++
 		gotMethod = r.Method
+		mu.Unlock()
 		// assert (not require): this runs on the server goroutine, where
 		// FailNow cannot stop the test goroutine.
 		assert.NoError(t, r.ParseForm())
@@ -3853,19 +3858,27 @@ func TestSignOutBackchannelLogoutSuccess(t *testing.T) {
 	assert.NotContains(t, location, mockIDP.URL)
 
 	// The IdP received the end-session POST with the backchannel credentials.
-	assert.Equal(t, 1, requestCount)
-	assert.Equal(t, http.MethodPost, gotMethod)
-	assert.Equal(t, clientID, gotPostForm.Get("client_id"))
-	assert.Equal(t, clientSecret, gotPostForm.Get("client_secret"))
-	assert.Equal(t, "some-refresh-token", gotPostForm.Get("refresh_token"))
+	// Snapshot the handler-captured fields under the same mutex that guards
+	// the writes on the server goroutine.
+	mu.Lock()
+	gotCount, gotReqMethod, gotForm := requestCount, gotMethod, gotPostForm
+	mu.Unlock()
+	assert.Equal(t, 1, gotCount)
+	assert.Equal(t, http.MethodPost, gotReqMethod)
+	assert.Equal(t, clientID, gotForm.Get("client_id"))
+	assert.Equal(t, clientSecret, gotForm.Get("client_secret"))
+	assert.Equal(t, "some-refresh-token", gotForm.Get("refresh_token"))
 }
 
 func TestSignOutBackchannelNon204FallsThroughToFrontchannel(t *testing.T) {
 	var requestCount int
+	var mu sync.Mutex
 	// Keycloak returns 200 with an HTML confirmation page when the backchannel
 	// convention is not satisfied. This must NOT be misread as success.
 	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		requestCount++
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("<html><body>logout confirmation</body></html>"))
 	}))
@@ -3889,13 +3902,19 @@ func TestSignOutBackchannelNon204FallsThroughToFrontchannel(t *testing.T) {
 	assert.Contains(t, location, "id_token_hint=")
 	assert.Contains(t, location, "post_logout_redirect_uri="+url.QueryEscape("https://proxy.example.com/oauth2/callback"))
 	// The backchannel attempt was actually made before falling through.
-	assert.Equal(t, 1, requestCount)
+	mu.Lock()
+	gotCount := requestCount
+	mu.Unlock()
+	assert.Equal(t, 1, gotCount)
 }
 
 func TestSignOutBackchannelSkippedWithoutRefreshToken(t *testing.T) {
 	var requestCount int
+	var mu sync.Mutex
 	mockIDP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		requestCount++
+		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer mockIDP.Close()
@@ -3911,7 +3930,10 @@ func TestSignOutBackchannelSkippedWithoutRefreshToken(t *testing.T) {
 	proxy.ServeHTTP(rw, req)
 
 	assert.Equal(t, http.StatusFound, rw.Code)
-	assert.Equal(t, 0, requestCount, "backchannel must not be attempted without a refresh token")
+	mu.Lock()
+	gotCount := requestCount
+	mu.Unlock()
+	assert.Equal(t, 0, gotCount, "backchannel must not be attempted without a refresh token")
 	location := rw.Header().Get("Location")
 	assert.True(t, strings.HasPrefix(location, mockIDP.URL), "expected front-channel redirect to IdP, got %q", location)
 	assert.Contains(t, location, "id_token_hint=")
