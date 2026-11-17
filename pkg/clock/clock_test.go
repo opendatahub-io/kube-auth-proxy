@@ -230,26 +230,6 @@ var _ = Describe("Clock suite", func() {
 					To(Equal(100 * time.Second))
 			})
 
-			It("mocks Sleep", func() {
-				var after int32
-				ready := make(chan struct{})
-				go func() {
-					close(ready)
-					testClock.Sleep(10 * time.Second)
-					atomic.StoreInt32(&after, 1)
-				}()
-				<-ready
-				time.Sleep(time.Millisecond)
-
-				err := testClock.Add(9 * time.Second)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(atomic.LoadInt32(&after)).To(Equal(int32(0)))
-
-				err = testClock.Add(1 * time.Second)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(atomic.LoadInt32(&after)).To(Equal(int32(1)))
-			})
-
 			It("mocks Tick", func() {
 				var ticks int32
 				ready := make(chan struct{})

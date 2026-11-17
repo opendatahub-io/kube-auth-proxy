@@ -124,12 +124,20 @@ func (c *Clock) Since(t time.Time) time.Duration {
 }
 
 func (c *Clock) Sleep(d time.Duration) {
+	c.sleep(d, nil)
+}
+
+func (c *Clock) sleep(d time.Duration, timerRegistered func()) {
 	m := c.mock
 	if m == nil {
 		globalClock.Sleep(d)
 		return
 	}
-	m.Sleep(d)
+	ch := m.After(d)
+	if timerRegistered != nil {
+		timerRegistered()
+	}
+	<-ch
 }
 
 func (c *Clock) Tick(d time.Duration) <-chan time.Time {
